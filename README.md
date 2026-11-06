@@ -372,50 +372,44 @@ Artifacts are `build/pones_corne_{left,right,dongle}/zephyr/zmk.uf2`
 
 ### Flash, reset old bonds, and pair
 
-The central role has moved: **reset stored settings on all three devices**,
-even if the halves already paired successfully with the old left-central map.
-This erases bonds/settings, not just the running firmware.
-
-Build board-specific reset images (no keyboard/adapter shield):
+Flashing is scripted by the project skill
+[`.agents/skills/zmk-flash`](.agents/skills/zmk-flash/SKILL.md). From the repo
+root, with Docker (`zmkfirmware/zmk-build-arm:3.5`) and a west workspace in
+`ZMK_WS` (default `../zmk-config-build/ws`):
 
 ```sh
-west build -p always -s zmk/app -b nice_nano_v2 -d build/reset_nice_nano -- \
-  -DSHIELD=settings_reset
-west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/reset_prospector -- \
-  -DSHIELD=settings_reset
+S=.agents/skills/zmk-flash/scripts/zmk-flash
+$S all full      # pull, west update (pinned), build, settings_reset + flash all three
+$S all halves    # rebuild and flash left then right, keeping bonds
+$S mark-good     # after testing: mark the session and push tag flash/<date>-<sha>
 ```
 
-1. Power off both halves. Connect one device at a time by USB data cable,
-   double-tap its hardware reset to enter UF2 mode, and copy its matching
-   `build/reset_*/zephyr/zmk.uf2` to its mounted bootloader drive.
-   Let settings-reset firmware boot and clear settings. Repeat for **dongle,
-   left, and right** (the nice!nano reset image is used on both halves).
-2. Re-enter each bootloader and flash its normal image: dongle to the XIAO,
-   left to left nice!nano, right to right nice!nano. Keep halves powered off
-   after flashing until their pairing turn. Do not interchange normal images.
-   For example, with the actual left bootloader mount:
+The script prints an `ACTION:` line for each physical step (bootloader entry:
+SYS+Z dongle, SYS+Q left, SYS+P right, or double-tap reset). Before writing,
+it identifies each bootloader drive by Board-ID and by comparing its
+`CURRENT.UF2` with recorded images, then saves that `CURRENT.UF2` under the
+gitignored `backups/` directory. Use `full` (`--reset`) whenever the
+central/peripheral roles or bonds change: it flashes `settings_reset` before
+each normal image, which erases bonds and settings, not only the firmware.
 
-   ```sh
-   cp build/pones_corne_left/zephyr/zmk.uf2 "/media/$USER/NICENANO/"
-   ```
-
-3. Plug the dongle into the host/KVM. Power **left only** and let it pair first;
+1. Run the plan and follow its `ACTION:` lines. Keep the halves powered off
+   after flashing until their pairing turn.
+2. Plug the dongle into the host/KVM. Power **left only** and let it pair first;
    confirm the dongle screen shows its battery before continuing.
    Then power **right** and let it pair second, so peripheral slot 0 is left
    and slot 1 is right on the dongle's per-half battery widget.
-4. USB host reports now come from the dongle. For Bluetooth, hold Enter/MOVE,
+3. USB host reports now come from the dongle. For Bluetooth, hold Enter/MOVE,
    select H or J (profile 0 or 1), then `;` (BLE output); pair **Pones Corne**
    in the host UI. Forget any stale host bond first to refresh the changed HID
    descriptor. MOVE+L selects USB preference for the KVM.
-5. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
+4. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
    held MOUSE two-axis pad scrolling, pad taps, thumb buttons, keyboard mouse
    fallbacks, dongle display, and application/KVM macros. USB on a half is
-   flashing/power only. SYS+Q / SYS+P enter the left / right half's bootloader,
-   SYS+Z the dongle's; use each device's hardware reset when pairing is absent.
+   flashing/power only. Then run `mark-good`.
 
 If pairing fails, follow upstream
 [split connection troubleshooting](https://zmk.dev/docs/troubleshooting/connection-issues)
-and reset **all three** again before pairing left then right.
+and rerun `$S flash full` before pairing left then right.
 
 ## Local validation
 

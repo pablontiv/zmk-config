@@ -1,0 +1,549 @@
+#!/usr/bin/env python3
+"""Update, build, validate and flash the Pones Corne (dongle + two halves).
+
+Subcommands:
+  update                 git pull --ff-only, sync config/west.yml, west update (pinned)
+  build [PLAN] [--reset] build the images PLAN needs into $ZMK_WS/out/<commit>
+  validate DIR|FILE...   structural UF2 checks (family, start address, flash range)
+  flash PLAN [--reset]   guided, unattended UF2 flashing with per-board backups
+  all PLAN [--reset]     update + build + flash
+  mark-good [SESSION]    mark a flash session known-good and push tag flash/<date>-<sha>
+  prune [--dry-run]      apply the backup retention policy
+  status                 list flash sessions
+
+PLAN: dongle | left | right | halves | all | full (= all --reset).
+
+`flash` never asks for confirmation. It prints `ACTION:` lines for the physical
+step the user must do and identifies every bootloader drive before writing:
+Board-ID from INFO_UF2.TXT, then the code region of CURRENT.UF2 against every
+image recorded in backups/. A drive that is not the expected board is released
+untouched. Before each write the board's CURRENT.UF2 is saved to the session.
+"""
+import argparse, datetime, hashlib, json, os, re, shutil, struct, subprocess, sys, time
+
+REPO = subprocess.run(["git", "-C", os.path.dirname(os.path.realpath(__file__)), "rev-parse", "--show-toplevel"],
+                      capture_output=True, text=True, check=True).stdout.strip()
+WS = os.environ.get("ZMK_WS", "../zmk-config-build/ws")
+BACKUPS = os.path.join(REPO, "backups")
+IMAGE = "zmkfirmware/zmk-build-arm:3.5"
+KEEP_RECENT = 5
+DETACH_TIMEOUT, BOOT_TIMEOUT, REPLUG_TIMEOUT = 30, 30, 120
+
+XIAO, NANO = "Seeed_XIAO_nRF52840_Sense", "nRF52840-nicenano"
+BOARDS = {  # board -> (Board-ID, code start, accepted UF2 families, normal image, reset image)
+    "dongle": (XIAO, 0x27000, {0x28860045, 0xADA52840}, "pones_corne_dongle.uf2", "settings_reset-seeeduino_xiao_ble.uf2"),
+    "left": (NANO, 0x26000, {0x239A00B3, 0xADA52840}, "pones_corne_left.uf2", "settings_reset-nice_nano_v2.uf2"),
+    "right": (NANO, 0x26000, {0x239A00B3, 0xADA52840}, "pones_corne_right.uf2", "settings_reset-nice_nano_v2.uf2"),
+}
+FLASH_END = 0xEA000  # first byte past the application area (settings/bootloader above)
+BUILDS = {  # image -> (zephyr board, shields, extra modules)
+    "pones_corne_left.uf2": ("nice_nano_v2", "pones_corne_left", None),
+    "pones_corne_right.uf2": ("nice_nano_v2", "pones_corne_right", None),
+    "pones_corne_dongle.uf2": ("seeeduino_xiao_ble", "pones_corne_dongle dongle_screen", "vendor/zmk-dongle-screen"),
+    "settings_reset-nice_nano_v2.uf2": ("nice_nano_v2", "settings_reset", None),
+    "settings_reset-seeeduino_xiao_ble.uf2": ("seeeduino_xiao_ble", "settings_reset", None),
+}
+PLANS = {"dongle": ["dongle"], "left": ["left"], "right": ["right"],
+         "halves": ["left", "right"], "all": ["dongle", "left", "right"], "full": ["dongle", "left", "right"]}
+BOOTLOADER_HINT = {"dongle": "SYS+Z, or double-tap the dongle reset",
+                   "left": "SYS+Q, or double-tap the left reset",
+                   "right": "SYS+P, or double-tap the right reset"}
+
+
+def log(msg):
+    print(time.strftime("%H:%M:%S"), msg, flush=True)
+
+
+def die(msg):
+    log(f"ERROR: {msg}")
+    sys.exit(1)
+
+
+def sha256(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+# --- UF2 -------------------------------------------------------------------
+
+def uf2_blocks(path):
+    data = open(path, "rb").read()
+    if len(data) % 512 or not data:
+        raise ValueError(f"size {len(data)} is not a multiple of 512")
+    for off in range(0, len(data), 512):
+        m0, m1, flags, addr, size, no, total, family = struct.unpack_from("<8I", data, off)
+        end_magic, = struct.unpack_from("<I", data, off + 508)
+        if (m0, m1, end_magic) != (0x0A324655, 0x9E5D5157, 0x0AB16F30):
+            raise ValueError(f"bad magic in block at offset {off}")
+        yield flags, addr, size, no, total, family, data[off + 32:off + 32 + size]
+
+
+def validate(path, board):
+    """Raise ValueError unless PATH is a complete application UF2 for BOARD."""
+    _, start, families, _, _ = BOARDS[board]
+    blocks = list(uf2_blocks(path))
+    n = len(blocks)
+    for i, (flags, addr, size, no, total, family, _) in enumerate(blocks):
+        if flags & 0x1:
+            raise ValueError(f"block {i} flagged not-main-flash")
+        if not flags & 0x2000 or family not in families:
+            raise ValueError(f"block {i} family {family:#x} not accepted by the {board} bootloader")
+        if no != i or total != n:
+            raise ValueError(f"block {i} numbered {no}/{total}, expected {i}/{n}")
+        if size != 256 or addr % 256:
+            raise ValueError(f"block {i} payload {size} B at {addr:#x}")
+    lo = min(b[1] for b in blocks)
+    hi = max(b[1] + b[2] for b in blocks)
+    if lo != start:
+        raise ValueError(f"starts at {lo:#x}, {board} application starts at {start:#x}")
+    if hi > FLASH_END:
+        raise ValueError(f"ends at {hi:#x}, past the application area {FLASH_END:#x}")
+    return {"blocks": n, "start": hex(lo), "end": hex(hi), "sha256": sha256(path)}
+
+
+def code_sig(path, start, length=0x8000):
+    """SHA-256 of the first 32 KiB of code decoded from a UF2.
+
+    CURRENT.UF2 also holds the settings partition, which changes with use, so
+    only the code region is compared. 32 KiB stays inside the settings_reset
+    image, so stale pages past a short image never matter.
+    """
+    buf = bytearray(length)
+    for _, addr, size, _, _, _, payload in uf2_blocks(path):
+        rel = addr - start
+        if 0 <= rel < length:
+            buf[rel:rel + min(size, length - rel)] = payload[:length - rel]
+    return hashlib.sha256(buf).hexdigest()
+
+
+def board_for_image(name):
+    for board, (_, _, _, normal, reset) in BOARDS.items():
+        if name == normal:
+            return board
+    return "dongle" if "xiao" in name else "left" if "nice_nano" in name else None
+
+
+# --- update / build ----------------------------------------------------------
+
+def docker(cmd, workdir="/work"):
+    run(["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/work/.home",
+         "-v", f"{WS}:/work", "-v", f"{REPO}:/config-src:ro", "-w", workdir, IMAGE, "bash", "-ec", cmd])
+
+
+def cmd_update(_args=None):
+    if git("status", "--porcelain", "--untracked-files=no"):
+        die("working tree has uncommitted changes; commit or stash before update")
+    log(f"git pull --ff-only ({git('rev-parse', '--abbrev-ref', 'HEAD')})")
+    run(["git", "-C", REPO, "pull", "--ff-only", "-q"])
+    os.makedirs(os.path.join(WS, "config"), exist_ok=True)
+    shutil.copy(os.path.join(REPO, "config/west.yml"), os.path.join(WS, "config/west.yml"))
+    log("west update (revisions pinned in config/west.yml)")
+    docker("set -o pipefail; west update 2>&1 | tail -n 5")
+    log(f"updated to {git('rev-parse', '--short', 'HEAD')}")
+
+
+def source_info():
+    return {"commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
+
+
+def out_dir(info=None):
+    info = info or source_info()
+    return os.path.join(WS, "out", info["commit"][:12] + ("-dirty" if info["dirty"] else ""))
+
+
+def plan_images(boards, reset):
+    names = [BOARDS[b][3] for b in boards]
+    if reset:
+        names += sorted({BOARDS[b][4] for b in boards})
+    return names
+
+
+def cmd_build(args):
+    boards, reset = PLANS[args.plan], args.reset or args.plan == "full"
+    info = source_info()
+    out = out_dir(info)
+    os.makedirs(out, exist_ok=True)
+    rel_out = os.path.relpath(out, WS)
+    for name in plan_images(boards, reset):
+        zboard, shields, module = BUILDS[name]
+        stem = name[:-4]
+        extra = f" -DZMK_EXTRA_MODULES=/config-src/{module}" if module else ""
+        log(f"building {name} ({zboard}, {shields})")
+        docker(f"west build -p always -s zmk/app -b {zboard} -d build/{stem} -- '-DSHIELD={shields}' "
+               f"-DZMK_CONFIG=/config-src/config{extra} > {rel_out}/{stem}-build.log 2>&1 "
+               f"|| {{ tail -n 30 {rel_out}/{stem}-build.log; exit 1; }}\n"
+               f"cp build/{stem}/zephyr/zmk.uf2 {rel_out}/{name}\n"
+               f"mkdir -p {rel_out}/{stem} && cp build/{stem}/zephyr/zmk.elf build/{stem}/zephyr/.config "
+               f"build/{stem}/zephyr/zephyr.dts {rel_out}/{stem}/")
+    docker(f"west list -f '{{name}} {{sha}}' $(west list -f '{{name}}' | grep -vx manifest) > {rel_out}/west-revisions.txt")
+    info["west"] = dict(line.split() for line in open(os.path.join(out, "west-revisions.txt")) if line.strip())
+    info["built"] = datetime.datetime.now().isoformat(timespec="seconds")
+    json.dump(info, open(os.path.join(out, "build.json"), "w"), indent=2)
+    cmd_validate(argparse.Namespace(paths=[out]))
+    log(f"BUILD OK: {out}")
+    return out
+
+
+def cmd_validate(args):
+    failed = False
+    for p in args.paths:
+        files = sorted(os.path.join(p, f) for f in os.listdir(p) if f.endswith(".uf2")) if os.path.isdir(p) else [p]
+        sums = []
+        for f in files:
+            board = board_for_image(os.path.basename(f))
+            try:
+                if not board:
+                    raise ValueError("cannot infer target board from file name")
+                r = validate(f, board)
+                log(f"valid {os.path.basename(f)}: {board}, {r['blocks']} blocks, {r['start']}..{r['end']}")
+                sums.append(f"{r['sha256']}  {os.path.basename(f)}\n")
+            except ValueError as e:
+                failed = True
+                log(f"INVALID {f}: {e}")
+        if os.path.isdir(p) and sums and not failed:
+            open(os.path.join(p, "SHA256SUMS"), "w").writelines(sums)
+    if failed:
+        sys.exit(1)
+
+
+# --- bootloader drives ---------------------------------------------------------
+
+def uf2_drives():
+    j = json.loads(subprocess.run(["lsblk", "-J", "-p", "-o", "NAME,FSTYPE,TRAN,MOUNTPOINT"],
+                                  capture_output=True, text=True).stdout)
+    found = []
+
+    def walk(n, tran):
+        tran = n.get("tran") or tran
+        if tran == "usb" and n.get("fstype") == "vfat":
+            found.append((n["name"], n.get("mountpoint")))
+        for c in n.get("children", []):
+            walk(c, tran)
+
+    for n in j["blockdevices"]:
+        walk(n, None)
+    return found
+
+
+def mount(dev, mp):
+    if mp:
+        return mp
+    r = subprocess.run(["udisksctl", "mount", "-b", dev, "--no-user-interaction"], capture_output=True, text=True)
+    if " at " in r.stdout:
+        return r.stdout.strip().split(" at ", 1)[1].rstrip(".")
+    return None
+
+
+def wait_drive(ignore):
+    while True:
+        for dev, mp in uf2_drives():
+            if dev in ignore:
+                continue
+            mp = mount(dev, mp)
+            if mp and os.path.exists(os.path.join(mp, "INFO_UF2.TXT")):
+                return dev, mp
+        ignore.intersection_update(d for d, _ in uf2_drives())
+        time.sleep(1)
+
+
+def release(dev, ignore):
+    subprocess.run(["udisksctl", "unmount", "-b", dev, "--no-user-interaction"], capture_output=True)
+    ignore.add(dev)
+
+
+def wait_gone(dev):
+    end = time.time() + DETACH_TIMEOUT
+    while time.time() < end:
+        if not os.path.exists(dev):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def kernel_since(epoch):
+    return subprocess.run(["journalctl", "-k", "--since", f"@{int(epoch)}", "-o", "cat", "--no-pager"],
+                          capture_output=True, text=True).stdout
+
+
+def wait_boot(since, timeout):
+    """True once the kernel logs a new ZMK USB device (PID 615e, any VID)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        log_ = kernel_since(since)
+        if re.search(r"idProduct=615e", log_):
+            return True, log_
+        time.sleep(1)
+    return False, kernel_since(since)
+
+
+# --- sessions --------------------------------------------------------------------
+
+def sessions():
+    out = []
+    for d in sorted(os.listdir(BACKUPS)) if os.path.isdir(BACKUPS) else []:
+        m = os.path.join(BACKUPS, d, "manifest.json")
+        if os.path.exists(m):
+            out.append(json.load(open(m)))
+    return sorted(out, key=lambda s: s["created"])
+
+
+def save_manifest(s):
+    json.dump(s, open(os.path.join(BACKUPS, s["id"], "manifest.json"), "w"), indent=2)
+
+
+def known_images():
+    """code signature -> (board, label) for every image recorded in backups/."""
+    known = {}
+    for s in sessions():
+        root = os.path.join(BACKUPS, s["id"])
+        for f in sorted(os.listdir(os.path.join(root, "before")) if os.path.isdir(os.path.join(root, "before")) else []):
+            board = f.split("-", 1)[0]
+            if f.endswith("CURRENT.UF2") and "-reset-" not in f and board in BOARDS:
+                known.setdefault(code_sig(os.path.join(root, "before", f), BOARDS[board][1]), (board, f"{s['id']}/before"))
+        flashed = os.path.join(root, "flashed")
+        for f in sorted(os.listdir(flashed)) if os.path.isdir(flashed) else []:
+            board = next((b for b, v in BOARDS.items() if v[3] == f), None)
+            if board:
+                known[code_sig(os.path.join(flashed, f), BOARDS[board][1])] = (board, f"{s['id']}/flashed")
+    return known
+
+
+def rollback_hint():
+    good = [s for s in sessions() if s.get("known_good")]
+    if good:
+        return f"{sys.argv[0]} flash <plan> --images {os.path.join(BACKUPS, good[-1]['id'], 'flashed')}"
+    return "no known-good session recorded"
+
+
+def cmd_flash(args):
+    boards, reset = PLANS[args.plan], args.reset or args.plan == "full"
+    images = os.path.abspath(args.images or out_dir())
+    names = plan_images(boards, reset)
+    missing = [n for n in names if not os.path.exists(os.path.join(images, n))]
+    if missing:
+        die(f"{images} lacks {missing}; run `build {args.plan}{' --reset' if reset else ''}` first")
+    for n in names:
+        try:
+            validate(os.path.join(images, n), board_for_image(n))
+        except ValueError as e:
+            die(f"{n}: {e}")
+
+    known = known_images()
+    created = datetime.datetime.now()
+    sid = created.strftime("%Y-%m-%dT%H%M%S-") + args.plan + ("-reset" if reset and args.plan != "full" else "")
+    root = os.path.join(BACKUPS, sid)
+    os.makedirs(os.path.join(root, "before"))
+    os.makedirs(os.path.join(root, "flashed"))
+    for n in names:
+        shutil.copy(os.path.join(images, n), os.path.join(root, "flashed", n))
+        stem = os.path.join(images, n[:-4])
+        if os.path.isdir(stem):
+            shutil.copytree(stem, os.path.join(root, "flashed", n[:-4]))
+    build = os.path.join(images, "build.json")
+    session = {"id": sid, "created": created.isoformat(timespec="seconds"), "plan": args.plan, "reset": reset,
+               "images_dir": images, "source": json.load(open(build)) if os.path.exists(build) else None,
+               "images": {n: sha256(os.path.join(images, n)) for n in names},
+               "steps": [], "boards": {}, "known_good": False, "result": "running"}
+    open(os.path.join(root, "flashed", "SHA256SUMS"), "w").writelines(f"{h}  {n}\n" for n, h in session["images"].items())
+
+    steps = []
+    for b in boards:
+        if reset:
+            steps.append((b, BOARDS[b][4], True))
+        steps.append((b, BOARDS[b][3], False))
+    session["steps"] = [{"board": b, "image": n, "status": "pending"} for b, n, _ in steps]
+    save_manifest(session)
+    log(f"SESSION {sid}: {len(steps)} steps, images from {images}")
+
+    ignore = set()
+    for i, (board, name, is_reset) in enumerate(steps):
+        step = session["steps"][i]
+        bid, start = BOARDS[board][0], BOARDS[board][1]
+        target_sig = code_sig(os.path.join(images, name), start)
+        reset_sig = code_sig(os.path.join(images, BOARDS[board][4]), start) if reset else None
+        log(f"STEP {i + 1}/{len(steps)} ACTION: put the {board.upper()} in bootloader ({BOOTLOADER_HINT[board]}) "
+            f"-> {name}")
+        while True:
+            dev, mp = wait_drive(ignore)
+            info = open(os.path.join(mp, "INFO_UF2.TXT")).read()
+            got = next((l.split(":", 1)[1].strip() for l in info.splitlines() if l.startswith("Board-ID")), "?")
+            if got != bid:
+                log(f"WRONG BOARD {dev}: Board-ID {got}, expected {bid}; nothing written. "
+                    f"ACTION: press reset once on that board, then bootloader on the {board.upper()}")
+                release(dev, ignore)
+                continue
+            cur_path = os.path.join(mp, "CURRENT.UF2")
+            cur = code_sig(cur_path, start)
+            who = known.get(cur)
+            if cur == target_sig and not is_reset:
+                verdict = "already"
+            elif reset_sig and cur == reset_sig:
+                verdict = "after-reset"  # identity not provable: both halves share the reset image
+            elif who and who[0] == board:
+                verdict = "identified"
+            elif who:
+                verdict = "other"
+            else:
+                verdict = "unknown"
+            if verdict == "other" or (verdict == "unknown" and not args.accept_unknown):
+                what = f"{who[0]} firmware ({who[1]})" if who else "firmware not recorded in backups/"
+                log(f"UNEXPECTED {dev}: runs {what}; nothing written. ACTION: press reset once on it, then "
+                    f"bootloader on the {board.upper()}" + ("" if who else " (or rerun with --accept-unknown)"))
+                release(dev, ignore)
+                continue
+            break
+        backup = os.path.join(root, "before", f"{board}-{'reset-' if not is_reset and reset else ''}CURRENT.UF2")
+        shutil.copy(cur_path, backup)
+        shutil.copy(os.path.join(mp, "INFO_UF2.TXT"), backup.replace("CURRENT.UF2", "INFO_UF2.TXT"))
+        step.update({"device": dev, "board_id": got, "before_sha256": sha256(backup),
+                     "before_identified_as": f"{who[0]} {who[1]}" if who else verdict})
+        if verdict == "after-reset":
+            log(f"{board}: running settings_reset; identity assumed from plan order")
+        if verdict == "already":
+            log(f"{board} already runs {name}; nothing written")
+            subprocess.run(["udisksctl", "unmount", "-b", dev, "--no-user-interaction"], capture_output=True)
+            ignore.add(dev)
+            step["status"] = "skipped-already-flashed"
+        else:
+            log(f"identified {board} ({step['before_identified_as']}); copying {name} -> {mp}")
+            t0 = time.time()
+            r = subprocess.run(["cp", os.path.join(images, name), mp], capture_output=True, text=True)
+            subprocess.run(["sync"])
+            if r.returncode:
+                log(f"cp exit {r.returncode}: {r.stderr.strip()} (bootloader may detach before cp returns)")
+            if not wait_gone(dev):
+                step["status"] = "failed-no-detach"
+                session["result"] = "failed"
+                save_manifest(session)
+                die(f"drive {dev} did not detach within {DETACH_TIMEOUT} s; flash state unknown. "
+                    f"Rollback: {rollback_hint()}")
+            ok, klog = wait_boot(t0, BOOT_TIMEOUT)
+            if not ok and re.search(r"error -110|unable to enumerate", klog):
+                log(f"{board}: USB enumeration failed after reboot (kernel: error -110). "
+                    f"ACTION: unplug the {board.upper()} USB cable, wait 3 s, plug it back in")
+                ok, klog = wait_boot(t0, REPLUG_TIMEOUT)
+                if not ok:
+                    step["status"] = "failed-no-boot"
+                    session["result"] = "failed"
+                    save_manifest(session)
+                    die(f"{board} did not enumerate after replug. Rollback: {rollback_hint()}")
+            step["status"] = "done" if ok else "done-no-usb-seen"
+            log(f"STEP {i + 1}/{len(steps)} DONE: {board} rebooted with {name}"
+                + ("" if ok else " (drive detached; no ZMK USB enumeration seen, e.g. powered without data)"))
+        step["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
+        if not is_reset:
+            session["boards"][board] = {"image": name, "sha256": session["images"][name]}
+        known[target_sig] = (board, f"{sid}/flashed")
+        save_manifest(session)
+
+    session["result"] = "complete"
+    save_manifest(session)
+    log(f"ALL DONE: session {sid}")
+    if reset:
+        log("ACTION: pairing - plug the dongle in, power LEFT only until its battery shows on the dongle, "
+            "then power RIGHT; on the host forget stale 'Pones Corne' bonds before pairing")
+    log(f"after testing, mark it good: {sys.argv[0]} mark-good {sid}")
+    cmd_prune(argparse.Namespace(dry_run=False))
+
+
+# --- retention ---------------------------------------------------------------------
+
+def cmd_mark_good(args):
+    all_ = sessions()
+    s = next((x for x in all_ if x["id"] == args.session), None) if args.session else \
+        next((x for x in reversed(all_) if x["result"] == "complete"), None)
+    if not s:
+        die(f"no session {args.session or '(latest complete)'}")
+    s["known_good"] = True
+    s["known_good_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    src = s.get("source") or {}
+    if src.get("commit") and not src.get("dirty"):
+        tag = f"flash/{s['created'][:10]}-{src['commit'][:7]}"
+        if not git("tag", "-l", tag):
+            run(["git", "-C", REPO, "tag", "-a", tag, src["commit"], "-m", f"Known-good flash session {s['id']}"])
+        run(["git", "-C", REPO, "push", "-q", "origin", tag])
+        s["tag"] = tag
+        log(f"tagged and pushed {tag}")
+    else:
+        log("source commit unknown or dirty; no tag created")
+    save_manifest(s)
+    log(f"KNOWN-GOOD: {s['id']}")
+
+
+def current_sessions(all_):
+    """Session ids whose flashed image is what each board runs now."""
+    keep = {}
+    for s in all_:
+        for b in s.get("boards", {}):
+            keep[b] = s["id"]
+    return set(keep.values())
+
+
+def cmd_prune(args):
+    all_ = sessions()
+    keep = {s["id"] for s in all_[-KEEP_RECENT:]} | current_sessions(all_)
+    good = [s for s in all_ if s.get("known_good")]
+    if good:
+        keep.add(good[-1]["id"])
+    drop = [s["id"] for s in all_ if s["id"] not in keep]
+    for sid in drop:
+        log(f"{'would prune' if args.dry_run else 'pruned'} {sid}")
+        if not args.dry_run:
+            shutil.rmtree(os.path.join(BACKUPS, sid))
+    log(f"retention: kept {len(keep)}, {'would prune' if args.dry_run else 'pruned'} {len(drop)}")
+
+
+def cmd_status(_args):
+    all_ = sessions()
+    current, good = current_sessions(all_), [s["id"] for s in all_ if s.get("known_good")]
+    for s in all_:
+        flags = [f for f, on in (("current", s["id"] in current), ("known-good", s.get("known_good")),
+                                 ("latest-good", good and s["id"] == good[-1])) if on]
+        commit = ((s.get("source") or {}).get("commit") or "-")[:7]
+        print(f"{s['id']:<40} {s['result']:<9} {commit:<8} boards={','.join(s.get('boards', {})) or '-':<18} "
+              f"{' '.join(flags)}")
+
+
+def cmd_all(args):
+    cmd_update()
+    args.images = cmd_build(args)
+    cmd_flash(args)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("update").set_defaults(fn=cmd_update)
+    for name, fn in (("build", cmd_build), ("flash", cmd_flash), ("all", cmd_all)):
+        sp = sub.add_parser(name)
+        sp.add_argument("plan", choices=PLANS, nargs="?" if name == "build" else None, default="full")
+        sp.add_argument("--reset", action="store_true", help="flash settings_reset before each board")
+        if name != "build":
+            sp.add_argument("--images", help="directory with the UF2 images (default: $ZMK_WS/out/<HEAD>)")
+            sp.add_argument("--accept-unknown", action="store_true",
+                            help="write to a board whose firmware is not recorded in backups/ (still backed up)")
+        sp.set_defaults(fn=fn)
+    sp = sub.add_parser("validate")
+    sp.add_argument("paths", nargs="+")
+    sp.set_defaults(fn=cmd_validate)
+    sp = sub.add_parser("mark-good")
+    sp.add_argument("session", nargs="?")
+    sp.set_defaults(fn=cmd_mark_good)
+    sp = sub.add_parser("prune")
+    sp.add_argument("--dry-run", action="store_true")
+    sp.set_defaults(fn=cmd_prune)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    args = p.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
