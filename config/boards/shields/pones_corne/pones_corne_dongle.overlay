@@ -20,14 +20,26 @@
 /* Only the dongle converts the right peripheral's input into host HID. */
 &trackpad_listener {
     status = "okay";
-    /* N/D halves cursor speed and retains fractional motion; buttons pass through. */
-    input-processors = <&zip_xy_scaler 1 2>;
+    /* x3 cursor speed with fractional remainders, as in the previous working firmware. */
+    input-processors = <&zip_xy_scaler 3 1>;
 
+    /* Overrides replace the base chain and the first matching one wins, so
+     * MOUSE scroll stays ahead of the speed toggles. No process-next. */
     scroll_on_mouse {
         layers = <5>; /* MOUSE in pones_corne.keymap. */
-        /* Overrides replace the base chain; tune scroll scaling independently. */
-        /* No process-next: do not also apply the base scaler. */
-        input-processors = <&zip_xy_scaler 1 2 &zip_xy_to_scroll_mapper>;
+        /* Unscaled scroll as in the previous firmware. */
+        input-processors = <&zip_xy_to_scroll_mapper>;
+    };
+
+    /* Factory "DPI Slow" / "DPI Fast" multipliers, toggled from SYS+D / SYS+E. */
+    pad_slow {
+        layers = <7>; /* PAD_SLOW */
+        input-processors = <&zip_xy_scaler 1 1>;
+    };
+
+    pad_fast {
+        layers = <8>; /* PAD_FAST */
+        input-processors = <&zip_xy_scaler 6 1>;
     };
 };
 /* No zip_temp_layer: pad activity must remain cursor motion off MOUSE. */

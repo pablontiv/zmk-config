@@ -52,12 +52,16 @@ Assumed standard Prospector hardware: ST7789 240×280 display, PWM backlight,
 and APDS9960 ambient-light sensor. If the actual build omits that sensor, set
 `CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n` and optionally
 `CONFIG_PROSPECTOR_FIXED_BRIGHTNESS=50` in `config/pones_corne_dongle.conf`.
-Keyboard-half OLEDs remain disabled; the Prospector display is enabled.
+The left half drives the stock Corne 128×32 SSD1306 OLED (`ssd1306@3c` on the
+OLED-header I²C bus, as in the previous working left firmware) with ZMK's
+built-in peripheral status screen; the right half's OLED stays disabled.
 
 ## Layout and behavior
 
 `config/pones_corne.keymap` keeps QMK's physical order and layer order:
-QWERTY, NUMBER, SYMBOL, MOVE, NAV, MOUSE. `config/pones.dtsi` contains
+QWERTY, NUMBER, SYMBOL, MOVE, NAV, MOUSE, plus ZMK-only SYS (6) and transparent
+trackpad-speed toggle layers PAD x1 (7) / PAD x6 (8).
+`config/pones.dtsi` contains
 stock ZMK behaviors/macros; `config/pones_corne.conf` enables pointing and disables
 underglow. Shield definitions and half-display defaults live in
 `config/boards/shields/pones_corne/`; central settings are in
@@ -94,7 +98,7 @@ Thumbs, left to right:
 | Space | NUMBER |
 | Enter | MOVE |
 | Backspace | MOUSE |
-| Delete | Plain Delete, no layer |
+| Delete | SYS |
 
 Home-row mods and layer-taps use **tap-preferred, 220 ms**. Interrupting with
 another key does not force a hold: hold past 220 ms to use the modifier/layer.
@@ -116,17 +120,19 @@ All unspecified keys are `&none`, **not transparent**. This preserves QMK's
 | --- | --- | --- |
 | NUMBER | F1–F4 / F5–F8 / F9–F12 | 7 8 9 `*` / `=` 4 5 6 `+` / 1 2 3 `/`; right thumbs `- . 0` |
 | SYMBOL | Home row: Print Screen, Ctrl+C, Ctrl+V, Ctrl+Shift+V | Grave, ampersand/pipe, hash, slash/backslash, caret; `@` and delimiters; tilde, minus/underscore, dollar, percent, question/exclamation |
-| MOVE | Herdr commands, Ctrl+Shift+Tab / Ctrl+Tab, KVM previous / next | Media row; H/J select BT profiles 0/1, K clears selected host bond, L/`;` prefer USB/BLE |
+| MOVE | Herdr commands, Ctrl+Shift+Tab / Ctrl+Tab, KVM previous / next | Media row |
 | NAV | Home row: GUI, Alt, Ctrl, Shift | Home / Up / End; Page Up / Left / Down / Right / Page Down; Alt+Left / Alt+Right |
-| MOUSE | Trackpad is primary; E = up, S/D/F = left/down/right and T/G = scroll up/down are keyboard fallback; Tab/Space thumbs = right/left click | Y-position = Insert, I = Caps Lock, P = bootloader; QMK debug-toggle position is blocked |
+| MOUSE | Trackpad is primary; E = up, S/D/F = left/down/right and T/G = scroll up/down are keyboard fallback; Tab/Space thumbs = right/left click | Y-position = Insert, I = Caps Lock; QMK debug-toggle position is blocked |
+| SYS | Q = left bootloader, W = left reset, E / D = toggle trackpad x6 / x1; Z = dongle bootloader (single-key combo); A/S = BT profile 0/1, C = clear selected host bond, F/G = prefer USB/BLE | O = right reset, P = right bootloader |
 
 The physical trackpad moves the cursor on base and all non-MOUSE layers.
 Hold Backspace/MOUSE past the layer-tap term to turn pad XY into horizontal/
 vertical scrolling; release it to return to cursor movement. Native pad taps
 and thumb mouse buttons remain available. Keyboard movement/scroll remain
 fallbacks before trackpad wiring/tuning is complete. Keyboard movement uses
-ZMK's stock quadratic acceleration over 1000 ms to 600 units/s; this is
-separate from the physical pad's input processor tuning below.
+linear acceleration over 300 ms (ZMK stock and factory ramp) to 1200 units/s
+(2x ZMK's stock 600); this is separate from the physical pad's input
+processor tuning below.
 
 ### Symbols: tap dance and hold-tap
 
@@ -170,13 +176,21 @@ bindings. KVM sequences target an external KVM's hotkey protocol, **not ZMK
 Bluetooth profile switching**. Connect the **Prospector dongle's USB** to that
 KVM; recognition depends on the KVM and must be checked on hardware.
 
-MOVE's formerly empty right home row now provides:
+SYS (hold Delete) groups device/system controls away from everyday layers:
 
 | Base position | Binding | Effect |
 | --- | --- | --- |
-| H / J | `&bt BT_SEL 0` / `&bt BT_SEL 1` | Select dongle host profile 0 / 1 |
-| K | `&bt BT_CLR` | Clear **selected host profile's** bond; not split bonds |
-| L / `;` | `&out OUT_USB` / `&out OUT_BLE` | Prefer USB / Bluetooth host output |
+| Q / P | `&bootloader` | UF2 bootloader on the **half whose key is pressed** (left / right) |
+| W / O | `&sys_reset` | Reboot the left / right half |
+| Z (single-key combo) | `&bootloader` | Combos run on the central: UF2 bootloader on the **dongle** |
+| A / S | `&bt BT_SEL 0` / `&bt BT_SEL 1` | Select dongle host profile 0 / 1 |
+| C | `&bt BT_CLR` | Clear **selected host profile's** bond; not split bonds |
+| F / G | `&out OUT_USB` / `&out OUT_BLE` | Prefer USB / Bluetooth host output |
+
+Hold Delete past 220 ms to reach SYS; a quick tap still sends Delete, but
+holding Delete no longer auto-repeats. Keyboard-triggered bootloader/reset on a
+half requires that half to be linked to the dongle (the layer state lives on
+the central); otherwise use the hardware reset button.
 
 Select USB before KVM macros; use BLE output plus a profile selection for a
 Bluetooth host. Output preference applies when that transport is ready; ZMK
@@ -228,15 +242,18 @@ update both if reordering layers. Processors live in the dongle overlay rather
 than a keymap `CONFIG_*` guard because Kconfig role symbols are not available
 at devicetree preprocessing time in this pinned build.
 
-- Cursor: `&zip_xy_scaler 1 2`, half-speed XY with fractional remainders.
-  Increase numerator N or decrease denominator D for faster movement;
-  `1 1` is unscaled. Keep D positive.
-- MOUSE (layer 5) override: `&zip_xy_scaler 1 2 &zip_xy_to_scroll_mapper`.
-  X becomes horizontal wheel, Y vertical wheel. Layer overrides **replace**
-  the base chain in pinned ZMK; the scaler is repeated deliberately and can
-  be tuned separately for scroll speed. Do not add `process-next`, which
+- Cursor: `&zip_xy_scaler 3 1`, ×3 XY with fractional remainders, matching
+  the base multiplier of the previous working firmware. Lower N or raise D
+  for slower movement; `1 1` is unscaled. Keep D positive.
+- MOUSE (layer 5) override: `&zip_xy_to_scroll_mapper` only, unscaled scroll as
+  in the previous firmware. X becomes horizontal wheel, Y vertical wheel.
+  Layer overrides **replace** the base chain in pinned ZMK; prepend a scaler
+  here to tune scroll speed separately. Do not add `process-next`, which
   would also run the base scaler.
 - Taps/button events pass through these XY processors unchanged.
+- PAD x1 (layer 7) / PAD x6 (layer 8): `&zip_xy_scaler 1 1` / `6 1`, the
+  factory firmware's "DPI Slow" / "DPI Fast" layers. Toggle with SYS+D / SYS+E;
+  if both are on, x1 wins. MOUSE scroll wins over both (first matching override).
 - `CONFIG_ZMK_POINTING_SMOOTH_SCROLLING=y` on central enables HID resolution
   multipliers for compatible hosts. Host support determines the observed
   high-resolution scrolling behavior; verify both the host and KVM.
@@ -388,8 +405,8 @@ west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/reset_prospector 
 5. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
    held MOUSE two-axis pad scrolling, pad taps, thumb buttons, keyboard mouse
    fallbacks, Prospector display, and application/KVM macros. USB on a half is
-   flashing/power only. MOUSE+P invokes the **right half's** bootloader behavior,
-   not the dongle's; use each device's hardware reset when pairing is absent.
+   flashing/power only. SYS+Q / SYS+P enter the left / right half's bootloader,
+   SYS+Z the dongle's; use each device's hardware reset when pairing is absent.
 
 If pairing fails, follow upstream
 [split connection troubleshooting](https://zmk.dev/docs/troubleshooting/connection-issues)
@@ -446,10 +463,11 @@ All five firmware builds complete; there is no module/API build blocker.
 ## Ported vs. deferred
 
 **Ported:** all six layers in 36-key order, eight home-row mods,
-five thumb layer-taps plus plain Delete, F+J Caps Word, eight symbol behaviors
+five thumb layer-taps plus a Delete/SYS layer-tap, F+J Caps Word, eight symbol behaviors
 (with adaptations above), seven Herdr macros, two KVM macros, media/navigation,
 right-peripheral physical pointing, fallback mouse movement/scroll/buttons,
-Caps Lock, Insert, and bootloader entry.
+Caps Lock, Insert, and bootloader entry (extended: per-device bootloader and
+reset on the ZMK-only SYS layer).
 
 **Deferred / intentional differences:**
 
@@ -457,8 +475,8 @@ Caps Lock, Insert, and bootloader entry.
   Stock dances retain single/double taps; type the pair manually.
 - QMK one-shot hold symbols, weak-modifier clearing, and exact tap-dance/
   hold-tap/Caps Word timing semantics. Stock ZMK behavior is used instead.
-- Keyboard-half OLED status, QMK logos, and custom font; half displays stay
-  disabled. Prospector uses its module's stock status screen.
+- QMK OLED logos and custom font; the left OLED uses ZMK's stock peripheral
+  status screen. Prospector uses its module's stock status screen.
 - QMK console keystroke logger and `DB_TOGG`; that key is blocked.
 - Exact QMK kinetic mouse tuning, AVR USB polling/debounce/EEPROM behavior,
   and RGB matrix animations. No in-repo runtime C or driver fork is added.

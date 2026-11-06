@@ -1,6 +1,9 @@
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/keys.h>
+// Keyboard mouse keys: 2x stock top speed, stock 300 ms linear ramp
+// (factory firmware used 300 ms / exponent 1 as well).
+#define ZMK_POINTING_DEFAULT_MOVE_VAL 1200
 #include <dt-bindings/zmk/pointing.h>
 #include <dt-bindings/zmk/outputs.h>
 
@@ -12,11 +15,13 @@
 #define L_MOVE 3
 #define NAV 4
 #define MOUSE 5
+#define SYS 6
+#define PAD_SLOW 7
+#define PAD_FAST 8
 
-// Match the intent of QMK's kinetic mouse keys, not its exact speed curve.
 &mmv {
-    time-to-max-speed-ms = <1000>;
-    acceleration-exponent = <2>;
+    time-to-max-speed-ms = <300>;
+    acceleration-exponent = <1>;
 };
 
 / {
@@ -27,6 +32,16 @@
             key-positions = <13 16>; // F + J in the 36-key transform.
             layers = <QWERTY>;
             bindings = <&caps_word>;
+        };
+
+        // Combos resolve on the central (SOURCE_LOCAL), so this single-key
+        // combo resets the dongle itself; a plain &bootloader on Z would
+        // reset the left half that sent the key.
+        combo_dongle_bootloader {
+            timeout-ms = <50>;
+            key-positions = <20>; // Z in the 36-key transform.
+            layers = <SYS>;
+            bindings = <&bootloader>;
         };
     };
 
@@ -41,7 +56,7 @@
                 &kp Q        &kp W       &kp E        &kp R        &kp T   &kp Y  &kp U        &kp I        &kp O       &kp P
                 &mt LGUI A   &mt LALT S  &mt LCTRL D  &mt LSHFT F  &kp G   &kp H  &mt RSHFT J  &mt RCTRL K  &mt LALT L  &mt RGUI SEMI
                 &kp Z        &kp X       &kp C        &kp V        &kp B   &kp N  &kp M        &kp COMMA    &kp DOT     &kp SQT
-                                               &lt NAV ESC  &lt SYMBOL TAB &lt NUMBER SPACE   &lt L_MOVE RET &lt MOUSE BSPC &kp DEL
+                                               &lt NAV ESC  &lt SYMBOL TAB &lt NUMBER SPACE   &lt L_MOVE RET &lt MOUSE BSPC &lt SYS DEL
             >;
         };
 
@@ -67,10 +82,10 @@
 
         move_layer {
             display-name = "MOVE";
-            // Free right home row: BT profiles 0/1, clear selected bond, USB/BLE output.
+            // BT/USB output controls live on SYS.
             bindings = <
                 &none      &hrd_pspc  &hrd_ptab  &kp LC(LS(TAB))  &kvm_prev   &kp C_PREV  &kp C_VOL_DN  &kp C_VOL_UP  &kp C_NEXT  &kp C_PP
-                &none      &hrd_nspc  &hrd_ntab  &kp LC(TAB)      &kvm_next   &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_CLR   &out OUT_USB &out OUT_BLE
+                &none      &hrd_nspc  &hrd_ntab  &kp LC(TAB)      &kvm_next   &none       &none         &none         &none       &none
                 &hrd_splh  &hrd_nwsp  &hrd_nwtb  &none            &none       &none       &none         &none         &none       &none
                                             &none &none &none   &none &none &none
             >;
@@ -89,10 +104,45 @@
         mouse_layer {
             display-name = "MOUSE";
             bindings = <
-                &none  &none           &mmv MOVE_UP    &none            &msc SCRL_UP     &kp INS  &none  &kp CAPS  &none  &bootloader
+                &none  &none           &mmv MOVE_UP    &none            &msc SCRL_UP     &kp INS  &none  &kp CAPS  &none  &none
                 &none  &mmv MOVE_LEFT  &mmv MOVE_DOWN  &mmv MOVE_RIGHT  &msc SCRL_DOWN   &none    &none  &none     &none  &none
                 &none  &none           &none           &none            &none           &none    &none  &none     &none  &none
                                               &none &mkp RCLK &mkp LCLK   &none &none &none
+            >;
+        };
+
+        // Held from the right outer thumb (DEL). Reset/bootloader run on the
+        // half whose key is pressed; Z (single-key combo) targets the dongle.
+        // D / E toggle trackpad precision (x1) / fast (x6), as factory DPI layers.
+        sys_layer {
+            display-name = "SYS";
+            bindings = <
+                &bootloader   &sys_reset    &tog PAD_FAST &none      &none          &none  &none  &none  &sys_reset  &bootloader
+                &bt BT_SEL 0  &bt BT_SEL 1  &tog PAD_SLOW &out OUT_USB &out OUT_BLE &none  &none  &none  &none       &none
+                &none         &none         &bt BT_CLR &none         &none          &none  &none  &none  &none       &none
+                                          &none &none &none   &none &none &none
+            >;
+        };
+
+        // Toggle-only speed layers: fully transparent, read by the dongle's
+        // trackpad listener (pones_corne_dongle.overlay).
+        pad_slow_layer {
+            display-name = "PAD x1";
+            bindings = <
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                                &trans &trans &trans   &trans &trans &trans
+            >;
+        };
+
+        pad_fast_layer {
+            display-name = "PAD x6";
+            bindings = <
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans
+                                &trans &trans &trans   &trans &trans &trans
             >;
         };
     };

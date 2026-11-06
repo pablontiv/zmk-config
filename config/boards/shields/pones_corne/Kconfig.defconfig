@@ -27,16 +27,47 @@ config ZMK_SPLIT_ROLE_CENTRAL
 
 endif
 
-if SHIELD_PONES_CORNE_LEFT || SHIELD_PONES_CORNE_RIGHT
+if SHIELD_PONES_CORNE_RIGHT
 
 config ZMK_DISPLAY
     default n
 
+config I2C
+    default y
+
 endif
 
-if SHIELD_PONES_CORNE_RIGHT
+# Left-half 128x32 SSD1306 OLED, as in the previous working firmware.
+if SHIELD_PONES_CORNE_LEFT
+
+config ZMK_DISPLAY
+    default y
+
+if ZMK_DISPLAY
 
 config I2C
     default y
+
+config SSD1306
+    default y
+
+endif # ZMK_DISPLAY
+
+if LVGL
+
+config LV_Z_VDB_SIZE
+    default 64
+
+config LV_DPI_DEF
+    default 148
+
+config LV_Z_BITS_PER_PIXEL
+    default 1
+
+choice LV_COLOR_DEPTH
+    default LV_COLOR_DEPTH_1
+endchoice
+
+endif # LVGL
 
 endif
