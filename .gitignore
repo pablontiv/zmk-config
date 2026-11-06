@@ -17,3 +17,4 @@ build-*/
 
 # Local firmware/config snapshots.
 /backups/
+__pycache__/
