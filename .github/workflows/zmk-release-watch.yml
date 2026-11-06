@@ -1,13 +1,12 @@
 name: ZMK release watch
 
-# Dependabot does not understand west manifests, so this checks weekly whether
+# Dependabot does not understand west manifests, so this checks monthly whether
 # the latest ZMK release differs from the revision pinned in config/west.yml
 # and opens (once) an issue when an update is available.
 
 on:
   schedule:
-    - cron: "0 14 * * 1" # Mondays 14:00 UTC
-  workflow_dispatch:
+    - cron: "0 14 1 * *" # 1st of each month, 14:00 UTC
 
 permissions:
   contents: read
