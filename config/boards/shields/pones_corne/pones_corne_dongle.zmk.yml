@@ -1,0 +1,9 @@
+file_format: "1"
+id: pones_corne_dongle
+name: Pones Corne Prospector central
+type: shield
+url: https://github.com/carrefinho/prospector/
+requires: [seeed_xiao]
+features:
+  - keys
+  - pointer

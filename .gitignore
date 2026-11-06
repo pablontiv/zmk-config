@@ -1,0 +1,16 @@
+.venv/
+.west/
+build/
+build-*/
+
+# West dependencies fetched by config/west.yml.
+/zmk/
+/cirque-input-module/
+/prospector-zmk-module/
+/zephyr/
+/modules/
+/tools/
+/bootloader/
+*.uf2
+*.hex
+*.bin

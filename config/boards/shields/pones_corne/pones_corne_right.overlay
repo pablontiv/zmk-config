@@ -1,0 +1,53 @@
+/* SPDX-License-Identifier: MIT */
+
+#include "pones_corne_matrix.dtsi"
+
+&default_transform {
+    col-offset = <5>;
+};
+
+&kscan0 {
+    /* Stock inner five columns, left-to-right; D21 is omitted entirely. */
+    col-gpios = <&pro_micro 14 GPIO_ACTIVE_HIGH>,
+                <&pro_micro 15 GPIO_ACTIVE_HIGH>,
+                <&pro_micro 18 GPIO_ACTIVE_HIGH>,
+                <&pro_micro 19 GPIO_ACTIVE_HIGH>,
+                <&pro_micro 20 GPIO_ACTIVE_HIGH>;
+};
+
+/*
+ * Cirque Pinnacle trackpad on I2C (address 0x2a).
+ * All values below were extracted from the factory/previous working right-half
+ * firmware (backups/2026-11-05/right-CURRENT.UF2, device "glidepoint@2a",
+ * driver cirque,pinnacle) by decoding its struct pinnacle_config, so they match
+ * the physical wiring and mounting of this keyboard:
+ *   bus i2c0, SDA D2 (P0.17), SCL D3 (P0.20), addr 0x2a,
+ *   DR D1 (P0.06, active high), no rotation, y-invert, 2x sensitivity, sleep,
+ *   z-min 5/4.
+ * D1 is free: the matrix does not use it and pro_micro_serial/uart0 is disabled.
+ *
+ * Tuning: sensitivity is ADC attenuation (1x..4x); rotate-90/x-invert/y-invert
+ * adapt to the mounting. Taps and secondary taps remain enabled.
+ */
+&pro_micro_i2c {
+    status = "okay";
+    clock-frequency = <100000>;
+
+    trackpad: trackpad@2a {
+        compatible = "cirque,pinnacle";
+        status = "okay";
+        reg = <0x2a>;
+        dr-gpios = <&pro_micro 1 GPIO_ACTIVE_HIGH>;
+        sensitivity = "2x";
+        y-invert;
+        sleep;
+        x-axis-z-min = <5>;
+        y-axis-z-min = <4>;
+    };
+};
+
+/* BLE input-split forwards movement, scroll and taps to the dongle central. */
+&trackpad_split {
+    status = "okay";
+    device = <&trackpad>;
+};

@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT
+
+if SHIELD_PONES_CORNE_DONGLE
+
+config ZMK_KEYBOARD_NAME
+    default "Pones Corne"
+
+config ZMK_SPLIT_ROLE_CENTRAL
+    default y
+
+endif
+
+if SHIELD_PONES_CORNE_LEFT || SHIELD_PONES_CORNE_RIGHT || SHIELD_PONES_CORNE_DONGLE
+
+config ZMK_SPLIT
+    default y
+
+config ZMK_POINTING
+    default y
+
+endif
+
+if SHIELD_PONES_CORNE_LEFT || SHIELD_PONES_CORNE_RIGHT
+
+config ZMK_SPLIT_ROLE_CENTRAL
+    default n
+
+endif
+
+if SHIELD_PONES_CORNE_LEFT || SHIELD_PONES_CORNE_RIGHT
+
+config ZMK_DISPLAY
+    default n
+
+endif
+
+if SHIELD_PONES_CORNE_RIGHT
+
+config I2C
+    default y
+
+endif

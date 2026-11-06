@@ -1,0 +1,12 @@
+file_format: "1"
+id: pones_corne
+name: Pones Corne 5-column
+type: shield
+url: https://github.com/foostan/crkbd/
+requires: [pro_micro]
+features:
+  - keys
+  - pointer
+siblings:
+  - pones_corne_left
+  - pones_corne_right

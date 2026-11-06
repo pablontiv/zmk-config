@@ -1,0 +1,126 @@
+/* Included after behaviors.dtsi and dt-bindings/zmk/keys.h. */
+
+&mt {
+    flavor = "tap-preferred";
+    tapping-term-ms = <220>;
+};
+
+&lt {
+    flavor = "tap-preferred";
+    tapping-term-ms = <220>;
+};
+
+/ {
+    behaviors {
+        /* Arguments are hold symbol, tap symbol, matching stock hold-tap. */
+        sym_ht: symbol_hold_tap {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            flavor = "tap-preferred";
+            tapping-term-ms = <180>;
+            bindings = <&kp>, <&kp>;
+        };
+
+        td_braces: tap_dance_braces {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <180>;
+            bindings = <&kp LBRC>, <&kp RBRC>;
+        };
+
+        td_parens: tap_dance_parens {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <180>;
+            bindings = <&kp LPAR>, <&kp RPAR>;
+        };
+
+        td_angles: tap_dance_angles {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <180>;
+            bindings = <&kp LT>, <&kp GT>;
+        };
+
+        td_brackets: tap_dance_brackets {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <180>;
+            bindings = <&kp LBKT>, <&kp RBKT>;
+        };
+
+        /* Each HID press lasts 10 ms; wait-ms is the release-to-press gap. */
+        kvm_prev: kvm_previous {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <50>;
+            bindings = <&kp RCTRL>, <&kp RCTRL>, <&kp PG_UP>;
+        };
+
+        kvm_next: kvm_next {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <50>;
+            bindings = <&kp RCTRL>, <&kp RCTRL>, <&kp PG_DN>;
+        };
+
+        /* Release Ctrl+B before the 10 ms gap and the unmodified command. */
+        hrd_ntab: herdr_next_tab {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp N>;
+        };
+
+        hrd_ptab: herdr_previous_tab {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp P>;
+        };
+
+        hrd_nspc: herdr_next_space {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp DOT>;
+        };
+
+        hrd_pspc: herdr_previous_space {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp COMMA>;
+        };
+
+        hrd_nwsp: herdr_new_space {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp LS(N)>;
+        };
+
+        hrd_nwtb: herdr_new_tab {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp C>;
+        };
+
+        hrd_splh: herdr_split_horizontal {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            tap-ms = <10>;
+            wait-ms = <10>;
+            bindings = <&kp LC(B)>, <&kp MINUS>;
+        };
+    };
+};

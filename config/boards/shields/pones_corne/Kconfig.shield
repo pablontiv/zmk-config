@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+
+config SHIELD_PONES_CORNE_LEFT
+    def_bool $(shields_list_contains,pones_corne_left)
+
+config SHIELD_PONES_CORNE_RIGHT
+    def_bool $(shields_list_contains,pones_corne_right)
+
+config SHIELD_PONES_CORNE_DONGLE
+    def_bool $(shields_list_contains,pones_corne_dongle)

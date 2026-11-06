@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: MIT */
+
+#include "pones_corne.dtsi"
+#include <input/processors.dtsi>
+
+/ {
+    /* The central receives every key over BLE; never synthesize local events. */
+    kscan0: kscan {
+        compatible = "zmk,kscan-mock";
+        rows = <4>;
+        columns = <10>;
+        events = <>;
+    };
+};
+
+&trackpad_split {
+    status = "okay";
+};
+
+/* Only the dongle converts the right peripheral's input into host HID. */
+&trackpad_listener {
+    status = "okay";
+    /* N/D halves cursor speed and retains fractional motion; buttons pass through. */
+    input-processors = <&zip_xy_scaler 1 2>;
+
+    scroll_on_mouse {
+        layers = <5>; /* MOUSE in pones_corne.keymap. */
+        /* Overrides replace the base chain; tune scroll scaling independently. */
+        /* No process-next: do not also apply the base scaler. */
+        input-processors = <&zip_xy_scaler 1 2 &zip_xy_to_scroll_mapper>;
+    };
+};
+/* No zip_temp_layer: pad activity must remain cursor motion off MOUSE. */

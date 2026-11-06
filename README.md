@@ -1,3 +1,480 @@
-# zmk-config
+# Pones five-column Corne + Cirque + Prospector — ZMK
 
-Private ZMK config (Corne). Port from [qmk_userspace](https://github.com/pablontiv/qmk_userspace) keymap `crkbd/pones`.
+Local-only ZMK port of the author's
+[QMK `crkbd/rev1:pones`](https://github.com/pablontiv/qmk_userspace/tree/main/keyboards/crkbd/rev1/keymaps/pones).
+No GitHub Actions workflows: private Actions minutes are intentionally parked.
+
+## Hardware and firmware
+
+- **Boards:** two `nice_nano_v2` controllers (nRF52840, Pro Micro footprint)
+  plus a **Prospector BT dongle**, built as `seeeduino_xiao_ble`.
+- **PCB:** true **five-column Corne**, 3×5 + 3 thumbs per half, **36 keys**.
+- **Shields:** in-repo `pones_corne_left`, `pones_corne_right`, and
+  `pones_corne_dongle`; the dongle also uses upstream `prospector_adapter`.
+- **Pointing:** circular Cirque GlidePoint/Pinnacle I²C trackpad on the right.
+  The model and wiring assumptions below must be checked against the actual PCB.
+- **Central:** Prospector; it connects to the host over USB or Bluetooth.
+  Both keyboard halves are BLE peripherals. **The keyboard needs the dongle**:
+  neither half works as an independent host keyboard/mouse with these images.
+- **ZMK:** v0.3.0, pinned to `edf5c0814fd3ea202e43aad2d68fd32e882a518c`
+  in `config/west.yml`, including its upstream Zephyr/module manifest.
+- **Host layout:** US ANSI. Symbols and shortcut macros are HID keycodes,
+  not Unicode or layout-independent text.
+
+The custom shield scans only five column GPIOs per half and uses one 36-position
+transform; there is no sixth matrix column or padded keymap. It reuses upstream
+Corne's five-column physical layout and standard Corne row/inner-column wiring.
+The nice!nano v2 has enough pins for this matrix and the trackpad; no controller
+change is required. This is **not** firmware for AVR/ATmega32U4 QMK controllers.
+Confirm PCB pinout, controller orientation, and power wiring before installation;
+do not connect a powered TRRS cable between wireless halves.
+
+### Prospector central
+
+[`carrefinho/prospector-zmk-module`](https://github.com/carrefinho/prospector-zmk-module/tree/77a852293532879c992847e01db27abe4f94fa9f)
+is pinned at **`77a852293532879c992847e01db27abe4f94fa9f`** (the module's
+ZMK v0.3 / Zephyr 3.5-compatible `main` line). Its
+[installation instructions](https://github.com/carrefinho/prospector-zmk-module/blob/77a852293532879c992847e01db27abe4f94fa9f/README.md)
+require `seeeduino_xiao_ble` with `prospector_adapter` alongside the keyboard's
+dongle shield. Do not select its Zephyr 4.1 branch or `xiao_ble//zmk` board for
+this pinned ZMK release.
+
+The dongle uses an empty mock scanner and the same 36-position transform as
+the halves; no phantom keys are generated. `CONFIG_ZMK_SPLIT_ROLE_CENTRAL=y`
+only there; both halves resolve it to `n`. The central reserves two split BLE
+peripherals and seven connection/bond slots (two halves plus five host
+profiles). Input-split ID 0 is declared on all three, enabled on the right
+source and dongle proxy, and disabled on the sensorless left: v0.3 requires
+every enabled peripheral input-split node to have a physical source device.
+
+The adapter enables its stock layer/Caps Word/peripheral battery/status screen.
+Assumed standard Prospector hardware: ST7789 240×280 display, PWM backlight,
+and APDS9960 ambient-light sensor. If the actual build omits that sensor, set
+`CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n` and optionally
+`CONFIG_PROSPECTOR_FIXED_BRIGHTNESS=50` in `config/pones_corne_dongle.conf`.
+Keyboard-half OLEDs remain disabled; the Prospector display is enabled.
+
+## Layout and behavior
+
+`config/pones_corne.keymap` keeps QMK's physical order and layer order:
+QWERTY, NUMBER, SYMBOL, MOVE, NAV, MOUSE. `config/pones.dtsi` contains
+stock ZMK behaviors/macros; `config/pones_corne.conf` enables pointing and disables
+underglow. Shield definitions and half-display defaults live in
+`config/boards/shields/pones_corne/`; central settings are in
+`config/pones_corne_dongle.conf`.
+
+Base, viewed from above:
+
+```text
+Q  W  E  R  T       Y  U  I  O  P
+A  S  D  F  G       H  J  K  L  ;
+Z  X  C  V  B       N  M  ,  .  '
+    Esc Tab Space   Enter Bspc Del
+```
+
+Home-row mods, **tap / hold**:
+
+| Key | Hold |
+| --- | --- |
+| A | Left GUI |
+| S | Left Alt |
+| D | Left Ctrl |
+| F | Left Shift |
+| J | Right Shift |
+| K | Right Ctrl |
+| L | Left Alt (intentional, matches QMK) |
+| ; | Right GUI |
+
+Thumbs, left to right:
+
+| Tap | Hold |
+| --- | --- |
+| Escape | NAV |
+| Tab | SYMBOL |
+| Space | NUMBER |
+| Enter | MOVE |
+| Backspace | MOUSE |
+| Delete | Plain Delete, no layer |
+
+Home-row mods and layer-taps use **tap-preferred, 220 ms**. Interrupting with
+another key does not force a hold: hold past 220 ms to use the modifier/layer.
+This follows the QMK configuration's intent without adding permissive hold or
+bilateral rules; the two firmware event engines are not timing-identical.
+Hold the thumb before using a layer key. Releasing it returns to base even
+though its position is blocked on the active layer.
+
+**F+J within 30 ms on base** (zero-based positions **13 + 16**) toggles stock
+ZMK Caps Word. It uses ZMK's standard continuation rules (no idle timeout in
+this pinned release), not a custom QMK emulation.
+
+### Layers
+
+All unspecified keys are `&none`, **not transparent**. This preserves QMK's
+`XXXXXXX` behavior: base letters, modifiers, and thumb taps do not leak through.
+
+| Layer | Left hand | Right hand / thumbs |
+| --- | --- | --- |
+| NUMBER | F1–F4 / F5–F8 / F9–F12 | 7 8 9 `*` / `=` 4 5 6 `+` / 1 2 3 `/`; right thumbs `- . 0` |
+| SYMBOL | Home row: Print Screen, Ctrl+C, Ctrl+V, Ctrl+Shift+V | Grave, ampersand/pipe, hash, slash/backslash, caret; `@` and delimiters; tilde, minus/underscore, dollar, percent, question/exclamation |
+| MOVE | Herdr commands, Ctrl+Shift+Tab / Ctrl+Tab, KVM previous / next | Media row; H/J select BT profiles 0/1, K clears selected host bond, L/`;` prefer USB/BLE |
+| NAV | Home row: GUI, Alt, Ctrl, Shift | Home / Up / End; Page Up / Left / Down / Right / Page Down; Alt+Left / Alt+Right |
+| MOUSE | Trackpad is primary; E = up, S/D/F = left/down/right and T/G = scroll up/down are keyboard fallback; Tab/Space thumbs = right/left click | Y-position = Insert, I = Caps Lock, P = bootloader; QMK debug-toggle position is blocked |
+
+The physical trackpad moves the cursor on base and all non-MOUSE layers.
+Hold Backspace/MOUSE past the layer-tap term to turn pad XY into horizontal/
+vertical scrolling; release it to return to cursor movement. Native pad taps
+and thumb mouse buttons remain available. Keyboard movement/scroll remain
+fallbacks before trackpad wiring/tuning is complete. Keyboard movement uses
+ZMK's stock quadratic acceleration over 1000 ms to 600 units/s; this is
+separate from the physical pad's input processor tuning below.
+
+### Symbols: tap dance and hold-tap
+
+On SYMBOL:
+
+| Base position | Single tap | Double tap | Hold |
+| --- | --- | --- | --- |
+| J | `{` | `}` | `{` (stock dance, no pair) |
+| K | `(` | `)` | `(` (stock dance, no pair) |
+| L | `<` | `>` | `<` (stock dance, no pair) |
+| ; | `[` | `]` | `[` (stock dance, no pair) |
+| U | `&` | — | `\|` |
+| O | `/` | — | `\` |
+| M | `-` | — | `_` |
+| ' | `?` | — | `!` |
+
+Delimiter dances use a 180 ms tapping term. A different key ends the dance
+early; holding a dance selects the current tap count. The other four symbols
+are ordinary tap-preferred hold-taps, also 180 ms, not multi-tap dances.
+Hold outputs remain pressed until release and may auto-repeat on the host;
+QMK's handlers emitted one-shot symbols.
+
+### Macros and KVM
+
+All MOVE macro positions are retained using stock ZMK macros:
+
+| Base position | Output |
+| --- | --- |
+| W / S | Herdr previous / next space: Ctrl+B, then `,` / `.` |
+| E / D | Herdr previous / next tab: Ctrl+B, then `p` / `n` |
+| Z | Herdr horizontal split: Ctrl+B, then `-` |
+| X | Herdr new space: Ctrl+B, then uppercase `N` |
+| C | Herdr new tab: Ctrl+B, then `c` |
+| T / G | KVM previous / next: Right Ctrl, Right Ctrl, Page Up / Page Down |
+
+Herdr sequences use 10 ms presses and a 10 ms gap after Ctrl+B. KVM uses
+10 ms presses and 50 ms gaps between released keys. Modifiers are released
+between steps. Invoke with other modifiers released; these macros do not
+clear physically held modifiers. The Herdr application must recognize those
+bindings. KVM sequences target an external KVM's hotkey protocol, **not ZMK
+Bluetooth profile switching**. Connect the **Prospector dongle's USB** to that
+KVM; recognition depends on the KVM and must be checked on hardware.
+
+MOVE's formerly empty right home row now provides:
+
+| Base position | Binding | Effect |
+| --- | --- | --- |
+| H / J | `&bt BT_SEL 0` / `&bt BT_SEL 1` | Select dongle host profile 0 / 1 |
+| K | `&bt BT_CLR` | Clear **selected host profile's** bond; not split bonds |
+| L / `;` | `&out OUT_USB` / `&out OUT_BLE` | Prefer USB / Bluetooth host output |
+
+Select USB before KVM macros; use BLE output plus a profile selection for a
+Bluetooth host. Output preference applies when that transport is ready; ZMK
+can fall back to the available transport. Profile selection does not change
+the KVM's physical port or the keyboard-halves' split pairing. Clear a profile
+only when intending to forget/re-pair its host.
+
+## Right-hand circular trackpad
+
+**Identified from the previous working firmware:** a Cirque GlidePoint
+**Pinnacle on I²C at `0x2a`** with a DR line on D1 (see "Wiring and tuning").
+The module/part number below is still an assumption: a **40 mm TM040040,
+Gen2 Pinnacle `1CA027`, 12-pin FFC, configured for I²C**. This is the conventional
+keyboard module sold with Corne mounting options; see the
+[Keycapsss module/specifications](https://keycapsss.com/GlidePoint-Cirque-Trackpad-TM040040-TM035035/KC10079-40-C)
+and [Corne + Cirque build log](https://beekeeb.com/cirque-trackpad-i2c-on-corne-keyboard/).
+The latter uses a 23 mm Pinnacle and establishes the OLED-header I²C wiring
+approach, not the author's exact PCB or trackpad model.
+The [original TM040040 specification, pp. 8–9](https://keycapsss.com/media/43/54/77/1758718807/tm040040_spi-i2c-pinntrackpad_spec1-2-1223705.pdf?ts=1758718807)
+identifies factory I²C parts as `TM040040-2023-xxx` and SPI parts as
+`TM040040-2024-xxx`; the latter need the documented I²C-mode conversion.
+Use the actual module's documentation rather than guessing resistor changes.
+The firmware requires **DR/data-ready**, not just a four-wire I²C adapter:
+break out J1 pin 4 (DR) in addition to pins 9 (SCL), 10 (SDA), 11 (GND),
+and 12 (3.3 V). Verify FFC contact orientation before powering it.
+
+**Do not substitute a newer Gen6/Gen6s “Timp” circle pad** merely because its
+diameter/model prefix matches. Cirque's
+[current circle-pad range](https://www.cirque.com/glidepoint-circle-trackpads)
+includes a different controller/interface; the Pinnacle driver is not a
+claim of support for that hardware. Check the ASIC and full part number first.
+
+Pinned ZMK v0.3.0 already supports peripheral input forwarding, but does not
+bundle this driver. `config/west.yml` retains
+[`petejohanson/cirque-input-module`](https://github.com/petejohanson/cirque-input-module/tree/0de55f36bc720b5be3d8880dc856d4d78baf5214)
+at `0de55f36bc720b5be3d8880dc856d4d78baf5214`.
+Only the right shield instantiates/enables the physical sensor; all three builds
+share input-split ID **0**. The right forwards sensor events over split BLE;
+the **dongle's** input listener applies processors and emits host mouse reports.
+The left has no pointing hardware or host listener.
+
+### Central input processors
+
+`config/boards/shields/pones_corne/pones_corne_dongle.overlay` configures the
+**dongle-only** listener with stock
+[ZMK input processors](https://zmk.dev/docs/keymaps/input-processors).
+The MOUSE override uses layer index 5, matching `MOUSE` in the shared keymap;
+update both if reordering layers. Processors live in the dongle overlay rather
+than a keymap `CONFIG_*` guard because Kconfig role symbols are not available
+at devicetree preprocessing time in this pinned build.
+
+- Cursor: `&zip_xy_scaler 1 2`, half-speed XY with fractional remainders.
+  Increase numerator N or decrease denominator D for faster movement;
+  `1 1` is unscaled. Keep D positive.
+- MOUSE (layer 5) override: `&zip_xy_scaler 1 2 &zip_xy_to_scroll_mapper`.
+  X becomes horizontal wheel, Y vertical wheel. Layer overrides **replace**
+  the base chain in pinned ZMK; the scaler is repeated deliberately and can
+  be tuned separately for scroll speed. Do not add `process-next`, which
+  would also run the base scaler.
+- Taps/button events pass through these XY processors unchanged.
+- `CONFIG_ZMK_POINTING_SMOOTH_SCROLLING=y` on central enables HID resolution
+  multipliers for compatible hosts. Host support determines the observed
+  high-resolution scrolling behavior; verify both the host and KVM.
+- **No `zip_temp_layer`:** automatic MOUSE activation would turn ordinary pad
+  movement into scrolling and alter the existing layer-tap interaction.
+
+Only rebuild/reflash the dongle for processor tuning. Sensor orientation,
+thresholds, and ADC sensitivity remain right-overlay settings and require
+rebuilding/reflashing the right half.
+
+### Wiring and tuning
+
+Every sensor setting below was **extracted from the right half's previous
+working firmware** (`backups/2026-11-05/right-CURRENT.UF2`, device
+`glidepoint@2a`, driver `cirque,pinnacle`). Its `struct pinnacle_config` was
+decoded from the UF2 payload. The same decoder, run on this repository's build,
+reproduces this overlay's values exactly. The previous firmware was built from
+the same Zephyr revision (`dacab4875df7`).
+
+| Trackpad signal | Right controller connection (from previous firmware) |
+| --- | --- |
+| SDA | Pro Micro **D2 = nRF P0.17** |
+| SCL | Pro Micro **D3 = nRF P0.20** |
+| DR | Pro Micro **D1 = nRF P0.06**, active high |
+
+D1 is the stock Corne serial pad. It is free here because the matrix does not
+use it and `pro_micro_serial`/`uart0` is disabled. If rebuilding the hardware,
+supply the pad from **regulated 3.3 V**, not RAW/battery+/USB 5 V, and keep the
+I²C pull-ups (4.7 kΩ per line) if the module does not provide them.
+
+All sensor settings are together in
+`config/boards/shields/pones_corne/pones_corne_right.overlay`:
+
+- Bus: `&pro_micro_i2c` (`i2c0`), **100 kHz**, address **0x2a**.
+- DR: `dr-gpios = <&pro_micro 1 GPIO_ACTIVE_HIGH>`.
+- Sensitivity: **`"2x"`**; driver supports `"1x"` through `"4x"` ADC sensitivity.
+  This is not cursor acceleration.
+- Mounting: no rotation, **`y-invert`**.
+- Contact thresholds: `x-axis-z-min = <5>`, `y-axis-z-min = <4>`.
+  Native taps/secondary taps remain enabled; thumb buttons provide explicit
+  clicks. Pinnacle firmware **`sleep`** is enabled, as before.
+
+For different bus pins, adjust `i2c0_default` and `i2c0_sleep` pinctrl in that
+right overlay; changing only the connector label does not reroute I²C.
+Pinned [nice!nano pinctrl](https://github.com/zmkfirmware/zmk/blob/edf5c0814fd3ea202e43aad2d68fd32e882a518c/app/boards/arm/nice_nano/nice_nano-pinctrl.dtsi)
+and [connector map](https://github.com/zmkfirmware/zmk/blob/edf5c0814fd3ea202e43aad2d68fd32e882a518c/app/boards/arm/nice_nano/arduino_pro_micro_pins.dtsi)
+establish the nRF mappings above.
+
+### Five-column matrix wiring assumption
+
+Standard Corne `col2row` wiring, with four row lines and **five** column lines
+per half. GPIO numbers below are Pro Micro pad names, not physical header indices:
+
+| Lines | Left, viewed from above | Right, viewed from above |
+| --- | --- | --- |
+| Rows 0–3 | D4, D5, D6, D7 | D4, D5, D6, D7 |
+| Columns 0–4 | D20, D19, D18, D15, D14 | D14, D15, D18, D19, D20 |
+| Thumb row 3 | Columns 2, 3, 4 | Columns 0, 1, 2 |
+
+The right transform adds a five-column offset; global key positions are
+0–29 for the three letter rows and 30–35 for the thumbs. D21 is not scanned.
+This follows the [pinned upstream Corne inner-column wiring](https://github.com/zmkfirmware/zmk/tree/edf5c0814fd3ea202e43aad2d68fd32e882a518c/app/boards/shields/corne);
+if the actual five-column PCB routes differently, change the shield row/column
+GPIO lists before flashing. D1 is free in this wiring plan and carries DR.
+
+## Build locally with west
+
+No cloud build or CI setup is required. Follow the upstream
+[v0.3 native toolchain setup](https://v0-3-branch.zmk.dev/docs/development/local-toolchain/setup/native)
+for host dependencies and the Zephyr SDK compatible with ZMK v0.3.0
+(SDK 0.16.8). On Linux this includes CMake, Ninja, device-tree-compiler,
+Python with venv support, and SDK host tools. Use a supported Python version
+for that Zephyr release (Python 3.11 is a conservative choice).
+
+From this checkout, initialize it as a west workspace once (it must not be
+inside another west workspace). Dependencies/build products stay ignored:
+
+```sh
+export PONES_CONFIG="$(pwd)"
+
+python3 -m venv "$HOME/.venvs/zmk-pones"
+. "$HOME/.venvs/zmk-pones/bin/activate"
+python -m pip install west==1.5.0 cmake==3.28.4 ninja
+west init -l config
+west update
+west zephyr-export
+python -m pip install -r zephyr/scripts/requirements.txt
+export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-0.16.8"
+```
+
+Set `ZEPHYR_SDK_INSTALL_DIR` to your actual SDK installation. On subsequent
+shells, reactivate the venv, set `PONES_CONFIG` and the two toolchain variables
+above, and enter this checkout. `west update` honors this repo's pinned manifest; after
+pulling changes to this repo, run it again if the manifest changed.
+
+Build **all three** targets, using separate build directories:
+
+```sh
+west build -p always -s zmk/app -b nice_nano_v2 -d build/pones_corne_left -- \
+  -DSHIELD=pones_corne_left -DZMK_CONFIG="$PONES_CONFIG/config"
+west build -p always -s zmk/app -b nice_nano_v2 -d build/pones_corne_right -- \
+  -DSHIELD=pones_corne_right -DZMK_CONFIG="$PONES_CONFIG/config"
+west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/pones_corne_dongle -- \
+  -DSHIELD="pones_corne_dongle prospector_adapter" \
+  -DZMK_CONFIG="$PONES_CONFIG/config"
+```
+
+Artifacts are `build/pones_corne_{left,right,dongle}/zephyr/zmk.uf2`
+(three separate directories). Keep firmware/build products out of Git.
+
+### Flash, reset old bonds, and pair
+
+The central role has moved: **reset stored settings on all three devices**,
+even if the halves already paired successfully with the old left-central map.
+This erases bonds/settings, not just the running firmware.
+
+Build board-specific reset images (no keyboard/adapter shield):
+
+```sh
+west build -p always -s zmk/app -b nice_nano_v2 -d build/reset_nice_nano -- \
+  -DSHIELD=settings_reset
+west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/reset_prospector -- \
+  -DSHIELD=settings_reset
+```
+
+1. Power off both halves. Connect one device at a time by USB data cable,
+   double-tap its hardware reset to enter UF2 mode, and copy its matching
+   `build/reset_*/zephyr/zmk.uf2` to its mounted bootloader drive.
+   Let settings-reset firmware boot and clear settings. Repeat for **dongle,
+   left, and right** (the nice!nano reset image is used on both halves).
+2. Re-enter each bootloader and flash its normal image: dongle to Prospector,
+   left to left nice!nano, right to right nice!nano. Keep halves powered off
+   after flashing until their pairing turn. Do not interchange normal images.
+   For example, with the actual left bootloader mount:
+
+   ```sh
+   cp build/pones_corne_left/zephyr/zmk.uf2 "/media/$USER/NICENANO/"
+   ```
+
+3. Plug the dongle into the host/KVM. Power **left only** and let it pair first;
+   confirm the Prospector peripheral connection indicator before continuing.
+   Then power **right** and let it pair second. This left-to-right order is
+   required by the Prospector peripheral battery/status widget arrangement.
+4. USB host reports now come from the dongle. For Bluetooth, hold Enter/MOVE,
+   select H or J (profile 0 or 1), then `;` (BLE output); pair **Pones Corne**
+   in the host UI. Forget any stale host bond first to refresh the changed HID
+   descriptor. MOVE+L selects USB preference for the KVM.
+5. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
+   held MOUSE two-axis pad scrolling, pad taps, thumb buttons, keyboard mouse
+   fallbacks, Prospector display, and application/KVM macros. USB on a half is
+   flashing/power only. MOUSE+P invokes the **right half's** bootloader behavior,
+   not the dongle's; use each device's hardware reset when pairing is absent.
+
+If pairing fails, follow upstream
+[split connection troubleshooting](https://zmk.dev/docs/troubleshooting/connection-issues)
+and reset **all three** again before pairing left then right.
+
+## Local validation
+
+All three images built locally with the pinned ZMK, Cirque, and Prospector
+modules, Zephyr SDK 0.16.8, west 1.5.0, CMake 3.28.4, and Python 3.13.5:
+
+| Shield | Board | Flash used / available | RAM used / 256 KiB | UF2 bytes |
+| --- | --- | --- | --- | --- |
+| `pones_corne_left` | `nice_nano_v2` | 170864 B / 792 KiB (21.07%) | 33868 B (12.92%) | 342016 |
+| `pones_corne_right` | `nice_nano_v2` | 175588 B / 792 KiB (21.65%) | 34100 B (13.01%) | 351232 |
+| `pones_corne_dongle` + `prospector_adapter` | `seeeduino_xiao_ble` | 436960 B / 788 KiB (54.15%) | 207316 B (79.08%) | 873984 |
+
+The display-heavy dongle leaves **54828 B** outside linked RAM allocations;
+runtime stack/heap headroom has not been measured on hardware. Both
+`settings_reset` images also built: nice!nano 46188 B flash / 11552 B RAM /
+92672-byte UF2; Prospector 49512 B flash / 11640 B RAM / 99328-byte UF2.
+Firmware is under the ignored `build/` directories shown above.
+
+Validation reused an external west/toolchain workspace, passing this checkout's
+`config` via `ZMK_CONFIG` and **both** pinned modules via `ZMK_EXTRA_MODULES`.
+Normal builds above discover modules through `west update`.
+Compiled devicetrees were checked for five scanned columns/four rows per half,
+36 transform entries, 36 physical keys, 36 bindings on each of six layers,
+the dongle's empty mock scanner and processor chains, right-only Cirque,
+dongle-only listener, and split ID 0 on all three. Generated Kconfig confirms
+the two peripheral roles, central role, two split peers, seven connection/bond
+slots, dongle display/smooth scrolling, and right-side Pinnacle.
+
+There is no native test suite in this configuration repository. A throwaway
+`native_posix_64` runtime included the actual dongle overlay and shared keymap;
+**12 assertions passed**, producing ten captured mouse reports. It exercised
+the production central split-event handler → input-split proxy → listener:
+half-speed XY, retained fractional motion, the right MOUSE thumb's 220 ms
+hold/release, two-axis scroll while held, pad button press/release passthrough,
+left-side fallback right-click/release, cursor restoration, and NAV cursor
+movement. Logical key events replace matrix scanning; injected split events
+replace BLE delivery; mouse reports are intercepted at the endpoint boundary.
+BLE host-profile switching, KVM acceptance, display appearance, physical
+scanning, and the Cirque driver's communication with silicon are **not**
+simulated or certified by this smoke. No smoke scaffolding is committed.
+
+Non-fatal upstream warnings remain: deprecated `config/boards` discovery and
+`NRF_STORE_REBOOT_TYPE_GPREGRET`, peripheral USB defaults, and XIAO devicetree
+duplicate-address/deprecated-label warnings. The pinned Prospector observer
+also warns about an implicit `peripheral_slot_index_for_conn` declaration and
+an unused local; the final ELF resolves that call to the pinned ZMK central's
+exported symbol. Stock settings-reset emits empty-keymap array warnings.
+All five firmware builds complete; there is no module/API build blocker.
+
+## Ported vs. deferred
+
+**Ported:** all six layers in 36-key order, eight home-row mods,
+five thumb layer-taps plus plain Delete, F+J Caps Word, eight symbol behaviors
+(with adaptations above), seven Herdr macros, two KVM macros, media/navigation,
+right-peripheral physical pointing, fallback mouse movement/scroll/buttons,
+Caps Lock, Insert, and bootloader entry.
+
+**Deferred / intentional differences:**
+
+- QMK delimiter **hold-to-type pairs** (`{}`, `()`, `<>`, `[]`).
+  Stock dances retain single/double taps; type the pair manually.
+- QMK one-shot hold symbols, weak-modifier clearing, and exact tap-dance/
+  hold-tap/Caps Word timing semantics. Stock ZMK behavior is used instead.
+- Keyboard-half OLED status, QMK logos, and custom font; half displays stay
+  disabled. Prospector uses its module's stock status screen.
+- QMK console keystroke logger and `DB_TOGG`; that key is blocked.
+- Exact QMK kinetic mouse tuning, AVR USB polling/debounce/EEPROM behavior,
+  and RGB matrix animations. No in-repo runtime C or driver fork is added.
+- Trackpad DR wiring, orientation, and sensitivity come from the previous
+  working firmware; real I²C communication with this build still needs hardware
+  validation, as does the exact module part number.
+- Split pairing, trackpad battery/power behavior, BLE/USB host reports, and
+  physical KVM acceptance require the actual keyboard. A local build cannot
+  certify these.
+- Reviewed but not yet enabled (enable after hardware soak/measurement):
+  `CONFIG_ZMK_SLEEP` with an idle timeout on the halves (matrix already has
+  `wakeup-source`); hold-tap `require-prior-idle-ms`/`quick-tap-ms` for home-row
+  mods; `CONFIG_ZMK_BLE_EXPERIMENTAL_CONN` only if host links drop; Prospector
+  display blanking, 4096 B display stack, or LVGL pool/font trimming only if the
+  dongle UI misbehaves (dongle RAM is ~79%); ZMK Studio on the dongle; moving to
+  ZMK main/Zephyr 4.1 once the Prospector module supports it.
+
+No extra layers were added. Bluetooth/output controls occupy previously blocked
+MOVE slots; all existing navigation and macro bindings remain in place.

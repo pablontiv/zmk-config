@@ -1,0 +1,99 @@
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/keys.h>
+#include <dt-bindings/zmk/pointing.h>
+#include <dt-bindings/zmk/outputs.h>
+
+#include "pones.dtsi"
+
+#define QWERTY 0
+#define NUMBER 1
+#define SYMBOL 2
+#define L_MOVE 3
+#define NAV 4
+#define MOUSE 5
+
+// Match the intent of QMK's kinetic mouse keys, not its exact speed curve.
+&mmv {
+    time-to-max-speed-ms = <1000>;
+    acceleration-exponent = <2>;
+};
+
+/ {
+    combos {
+        compatible = "zmk,combos";
+        combo_caps_word {
+            timeout-ms = <30>;
+            key-positions = <13 16>; // F + J in the 36-key transform.
+            layers = <QWERTY>;
+            bindings = <&caps_word>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        // Five-column Corne order: three rows of 10, then six thumbs.
+        // &none deliberately blocks keys, matching QMK XXXXXXX.
+        qwerty_layer {
+            display-name = "QWERTY";
+            bindings = <
+                &kp Q        &kp W       &kp E        &kp R        &kp T   &kp Y  &kp U        &kp I        &kp O       &kp P
+                &mt LGUI A   &mt LALT S  &mt LCTRL D  &mt LSHFT F  &kp G   &kp H  &mt RSHFT J  &mt RCTRL K  &mt LALT L  &mt RGUI SEMI
+                &kp Z        &kp X       &kp C        &kp V        &kp B   &kp N  &kp M        &kp COMMA    &kp DOT     &kp SQT
+                                               &lt NAV ESC  &lt SYMBOL TAB &lt NUMBER SPACE   &lt L_MOVE RET &lt MOUSE BSPC &kp DEL
+            >;
+        };
+
+        number_layer {
+            display-name = "NUMBER";
+            bindings = <
+                &kp F1  &kp F2   &kp F3   &kp F4   &none   &none      &kp N7  &kp N8  &kp N9  &kp ASTRK
+                &kp F5  &kp F6   &kp F7   &kp F8   &none   &kp EQUAL  &kp N4  &kp N5  &kp N6  &kp PLUS
+                &kp F9  &kp F10  &kp F11  &kp F12  &none   &none      &kp N1  &kp N2  &kp N3  &kp FSLH
+                                       &none &none &none   &kp MINUS &kp DOT &kp N0
+            >;
+        };
+
+        symbol_layer {
+            display-name = "SYMBOL";
+            bindings = <
+                &none     &none      &none      &none          &none   &kp GRAVE  &sym_ht PIPE AMPS  &kp HASH    &sym_ht BSLH FSLH  &kp CARET
+                &kp PSCRN &kp LC(C)  &kp LC(V)  &kp LC(LS(V))  &none   &kp AT     &td_braces         &td_parens  &td_angles         &td_brackets
+                &none     &none      &none      &none          &none   &kp TILDE  &sym_ht UNDER MINUS &kp DLLR   &kp PRCNT          &sym_ht EXCL QMARK
+                                          &none &none &none   &none &none &none
+            >;
+        };
+
+        move_layer {
+            display-name = "MOVE";
+            // Free right home row: BT profiles 0/1, clear selected bond, USB/BLE output.
+            bindings = <
+                &none      &hrd_pspc  &hrd_ptab  &kp LC(LS(TAB))  &kvm_prev   &kp C_PREV  &kp C_VOL_DN  &kp C_VOL_UP  &kp C_NEXT  &kp C_PP
+                &none      &hrd_nspc  &hrd_ntab  &kp LC(TAB)      &kvm_next   &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_CLR   &out OUT_USB &out OUT_BLE
+                &hrd_splh  &hrd_nwsp  &hrd_nwtb  &none            &none       &none       &none         &none         &none       &none
+                                            &none &none &none   &none &none &none
+            >;
+        };
+
+        nav_layer {
+            display-name = "NAV";
+            bindings = <
+                &none     &none     &none      &none      &none   &none      &kp HOME      &kp UP    &kp END        &none
+                &kp LGUI  &kp LALT  &kp LCTRL  &kp LSHFT  &none   &kp PG_UP  &kp LEFT      &kp DOWN  &kp RIGHT      &kp PG_DN
+                &none     &none     &none      &none      &none   &none      &kp LA(LEFT)  &none     &kp LA(RIGHT)  &none
+                                          &none &none &none   &none &none &none
+            >;
+        };
+
+        mouse_layer {
+            display-name = "MOUSE";
+            bindings = <
+                &none  &none           &mmv MOVE_UP    &none            &msc SCRL_UP     &kp INS  &none  &kp CAPS  &none  &bootloader
+                &none  &mmv MOVE_LEFT  &mmv MOVE_DOWN  &mmv MOVE_RIGHT  &msc SCRL_DOWN   &none    &none  &none     &none  &none
+                &none  &none           &none           &none            &none           &none    &none  &none     &none  &none
+                                              &none &mkp RCLK &mkp LCLK   &none &none &none
+            >;
+        };
+    };
+};
