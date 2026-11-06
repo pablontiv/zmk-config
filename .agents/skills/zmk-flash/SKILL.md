@@ -51,7 +51,7 @@ Bootloader entry: dongle SYS+Z, left SYS+Q, right SYS+P (SYS = hold the right
 outer thumb), or double-tap the board's reset. After `settings_reset` the
 SYS keys are gone; the user must double-tap reset.
 
-Workspace: `ZMK_WS` (default `../zmk-config-build/ws`), a west
+Workspace: `ZMK_WS` (default `.zmk/` in the repo, gitignored), a west
 workspace whose manifest is `config/west.yml`; the repo is mounted read-only at
 `/config-src` inside the container.
 

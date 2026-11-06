@@ -6,7 +6,6 @@ build-*/
 # West dependencies fetched by config/west.yml.
 /zmk/
 /cirque-input-module/
-/prospector-zmk-module/
 /zephyr/
 /modules/
 /tools/
@@ -15,6 +14,7 @@ build-*/
 *.hex
 *.bin
 
-# Local firmware/config snapshots.
+# Local flash backups, Docker west workspace (zmk-flash skill), Python caches.
 /backups/
+/.zmk/
 __pycache__/

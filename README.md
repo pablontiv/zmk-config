@@ -375,7 +375,7 @@ Artifacts are `build/pones_corne_{left,right,dongle}/zephyr/zmk.uf2`
 Flashing is scripted by the project skill
 [`.agents/skills/zmk-flash`](.agents/skills/zmk-flash/SKILL.md). From the repo
 root, with Docker (`zmkfirmware/zmk-build-arm:3.5`) and a west workspace in
-`ZMK_WS` (default `../zmk-config-build/ws`):
+`ZMK_WS` (default `.zmk/`, gitignored):
 
 ```sh
 S=.agents/skills/zmk-flash/scripts/zmk-flash
