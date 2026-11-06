@@ -1,8 +1,10 @@
 # Pones five-column Corne + Cirque + Prospector hardware (YADS screen) — ZMK
 
-Local-only ZMK port of the author's
-[QMK `crkbd/rev1:pones`](https://github.com/pablontiv/qmk_userspace/tree/main/keyboards/crkbd/rev1/keymaps/pones).
-No GitHub Actions workflows: private Actions minutes are intentionally parked.
+Personal ZMK configuration for a 36-key, five-column Corne with a right-hand
+Cirque trackpad and a Prospector dongle running the YADS screen firmware,
+ported from the [QMK `crkbd/rev1:pones`](https://github.com/pablontiv/qmk_userspace/tree/main/keyboards/crkbd/rev1/keymaps/pones)
+keymap. Firmware is built locally; this repository has no GitHub Actions build
+workflow.
 
 ## Hardware and firmware
 
@@ -212,7 +214,7 @@ keyboard module sold with Corne mounting options; see the
 [Keycapsss module/specifications](https://keycapsss.com/GlidePoint-Cirque-Trackpad-TM040040-TM035035/KC10079-40-C)
 and [Corne + Cirque build log](https://beekeeb.com/cirque-trackpad-i2c-on-corne-keyboard/).
 The latter uses a 23 mm Pinnacle and establishes the OLED-header I²C wiring
-approach, not the author's exact PCB or trackpad model.
+approach, not this build's exact PCB or trackpad model.
 The [original TM040040 specification, pp. 8–9](https://keycapsss.com/media/43/54/77/1758718807/tm040040_spi-i2c-pinntrackpad_spec1-2-1223705.pdf?ts=1758718807)
 identifies factory I²C parts as `TM040040-2023-xxx` and SPI parts as
 `TM040040-2024-xxx`; the latter need the documented I²C-mode conversion.
@@ -398,10 +400,10 @@ each normal image, which erases bonds and settings, not only the firmware.
    confirm the dongle screen shows its battery before continuing.
    Then power **right** and let it pair second, so peripheral slot 0 is left
    and slot 1 is right on the dongle's per-half battery widget.
-3. USB host reports now come from the dongle. For Bluetooth, hold Enter/MOVE,
-   select H or J (profile 0 or 1), then `;` (BLE output); pair **Pones Corne**
-   in the host UI. Forget any stale host bond first to refresh the changed HID
-   descriptor. MOVE+L selects USB preference for the KVM.
+3. USB host reports now come from the dongle. For Bluetooth, hold Delete past
+   220 ms to reach SYS, press A or S (profile 0 or 1), then G (BLE output);
+   pair **Pones Corne** in the host UI. Forget any stale host bond first to
+   refresh the changed HID descriptor. SYS+F selects USB preference for the KVM.
 4. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
    held MOUSE two-axis pad scrolling, pad taps, thumb buttons, keyboard mouse
    fallbacks, dongle display, and application/KVM macros. USB on a half is
@@ -413,8 +415,10 @@ and rerun `$S flash full` before pairing left then right.
 
 ## Local validation
 
-All three images built locally with the pinned ZMK and Cirque modules, the
-vendored YADS screen, Zephyr SDK 0.16.8, west 1.5.0, CMake 3.28.4, and Python 3.13.5:
+These results were recorded during development and are not re-run per commit;
+re-validate after changing the keymap or modules. All three images built
+locally with the pinned ZMK and Cirque modules, the vendored YADS screen,
+Zephyr SDK 0.16.8, west 1.5.0, CMake 3.28.4, and Python 3.13.5:
 
 | Shield | Board | Flash used / available | RAM used / 256 KiB | UF2 bytes |
 | --- | --- | --- | --- | --- |
@@ -491,5 +495,13 @@ reset on the ZMK-only SYS layer).
   pool/font trimming only if the dongle UI misbehaves (dongle RAM is ~81%);
   ZMK Studio on the dongle; moving to ZMK main/Zephyr 4.1.
 
-No extra layers were added. Bluetooth/output controls occupy previously blocked
-MOVE slots; all existing navigation and macro bindings remain in place.
+The six original QMK layers keep their order and bindings. ZMK adds SYS for
+device, Bluetooth and output controls, plus two transparent toggle layers for
+trackpad speed.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Vendored code under `vendor/zmk-dongle-screen`
+keeps its own terms: the module is MIT (`vendor/zmk-dongle-screen/LICENSE`),
+and files carrying their own SPDX headers (for example the Apache-2.0 ST7789
+display driver) remain under those licenses.
