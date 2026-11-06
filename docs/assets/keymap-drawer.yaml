@@ -1,0 +1,28 @@
+draw_config:
+  shrink_wide_legends: 5
+parse_config:
+  raw_binding_map:
+    '&caps_word': Caps Word
+    '&bootloader': Boot
+    '&sys_reset': Reset
+    '&td_braces': {t: '{', s: '}'}
+    '&td_parens': {t: '(', s: ')'}
+    '&td_angles': {t: '<', s: '>'}
+    '&td_brackets': {t: '[', s: ']'}
+    '&hrd_pspc': Space prev
+    '&hrd_nspc': Space next
+    '&hrd_ptab': Tab prev
+    '&hrd_ntab': Tab next
+    '&hrd_splh': Split horiz
+    '&hrd_nwsp': Space new
+    '&hrd_nwtb': Tab new
+    '&kvm_prev': KVM prev
+    '&kvm_next': KVM next
+    '&mmv MOVE_UP': Mouse up
+    '&mmv MOVE_LEFT': Mouse left
+    '&mmv MOVE_DOWN': Mouse down
+    '&mmv MOVE_RIGHT': Mouse right
+    '&msc SCRL_UP': Scroll up
+    '&msc SCRL_DOWN': Scroll down
+    '&mkp RCLK': Right click
+    '&mkp LCLK': Left click
