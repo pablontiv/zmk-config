@@ -1,4 +1,4 @@
-# Pones five-column Corne + Cirque + Prospector — ZMK
+# Pones five-column Corne + Cirque + Prospector hardware (YADS screen) — ZMK
 
 Local-only ZMK port of the author's
 [QMK `crkbd/rev1:pones`](https://github.com/pablontiv/qmk_userspace/tree/main/keyboards/crkbd/rev1/keymaps/pones).
@@ -10,10 +10,10 @@ No GitHub Actions workflows: private Actions minutes are intentionally parked.
   plus a **Prospector BT dongle**, built as `seeeduino_xiao_ble`.
 - **PCB:** true **five-column Corne**, 3×5 + 3 thumbs per half, **36 keys**.
 - **Shields:** in-repo `pones_corne_left`, `pones_corne_right`, and
-  `pones_corne_dongle`; the dongle also uses upstream `prospector_adapter`.
+  `pones_corne_dongle`; the dongle also uses the vendored YADS `dongle_screen`.
 - **Pointing:** circular Cirque GlidePoint/Pinnacle I²C trackpad on the right.
   The model and wiring assumptions below must be checked against the actual PCB.
-- **Central:** Prospector; it connects to the host over USB or Bluetooth.
+- **Central:** Prospector-hardware dongle; it connects to the host over USB or Bluetooth.
   Both keyboard halves are BLE peripherals. **The keyboard needs the dongle**:
   neither half works as an independent host keyboard/mouse with these images.
 - **ZMK:** v0.3.0, pinned to `edf5c0814fd3ea202e43aad2d68fd32e882a518c`
@@ -29,15 +29,18 @@ change is required. This is **not** firmware for AVR/ATmega32U4 QMK controllers.
 Confirm PCB pinout, controller orientation, and power wiring before installation;
 do not connect a powered TRRS cable between wireless halves.
 
-### Prospector central
+### Dongle central (Prospector hardware, YADS firmware)
 
-[`carrefinho/prospector-zmk-module`](https://github.com/carrefinho/prospector-zmk-module/tree/77a852293532879c992847e01db27abe4f94fa9f)
-is pinned at **`77a852293532879c992847e01db27abe4f94fa9f`** (the module's
-ZMK v0.3 / Zephyr 3.5-compatible `main` line). Its
-[installation instructions](https://github.com/carrefinho/prospector-zmk-module/blob/77a852293532879c992847e01db27abe4f94fa9f/README.md)
-require `seeeduino_xiao_ble` with `prospector_adapter` alongside the keyboard's
-dongle shield. Do not select its Zephyr 4.1 branch or `xiao_ble//zmk` board for
-this pinned ZMK release.
+The dongle hardware is a standard Prospector (XIAO BLE, ST7789 240×280, PWM
+backlight, APDS9960), built as `seeeduino_xiao_ble`. Its screen firmware is
+[YADS `janpfischer/zmk-dongle-screen`](https://github.com/janpfischer/zmk-dongle-screen)
+(MIT), **vendored** under `vendor/zmk-dongle-screen` because the fetched copy
+carried no Git revision to pin (snapshot fetched 2026-11-06). It targets the
+same ZMK v0.3 / Zephyr 3.5 / LVGL 8 stack and replaces the former
+`prospector-zmk-module`; the two cannot coexist (both register the ST7789
+driver and LVGL glue). Local change to the vendored copy:
+`src/widgets/layer_status.c` converts the active layer index to an id before
+`zmk_keymap_layer_name()` (a no-op while layer reordering/Studio stay off).
 
 The dongle uses an empty mock scanner and the same 36-position transform as
 the halves; no phantom keys are generated. `CONFIG_ZMK_SPLIT_ROLE_CENTRAL=y`
@@ -47,11 +50,12 @@ profiles). Input-split ID 0 is declared on all three, enabled on the right
 source and dongle proxy, and disabled on the sensorless left: v0.3 requires
 every enabled peripheral input-split node to have a physical source device.
 
-The adapter enables its stock layer/Caps Word/peripheral battery/status screen.
-Assumed standard Prospector hardware: ST7789 240×280 display, PWM backlight,
-and APDS9960 ambient-light sensor. If the actual build omits that sensor, set
-`CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n` and optionally
-`CONFIG_PROSPECTOR_FIXED_BRIGHTNESS=50` in `config/pones_corne_dongle.conf`.
+YADS shows output (USB/BLE + profile), active layer name, modifiers, WPM and
+per-half battery, blanks after 600 s idle, and drives brightness from the
+APDS9960 (`CONFIG_DONGLE_SCREEN_AMBIENT_LIGHT=y`). F22/F23/F24 adjust/toggle
+brightness; the keymap does not bind them. Caps Word has no indicator (the
+old Prospector screen had one). If the actual build omits the light sensor,
+set `CONFIG_DONGLE_SCREEN_AMBIENT_LIGHT=n` in `config/pones_corne_dongle.conf`.
 The left half drives the stock Corne 128×32 SSD1306 OLED (`ssd1306@3c` on the
 OLED-header I²C bus, as in the previous working left firmware) with ZMK's
 built-in peripheral status screen; the right half's OLED stays disabled.
@@ -358,8 +362,9 @@ west build -p always -s zmk/app -b nice_nano_v2 -d build/pones_corne_left -- \
 west build -p always -s zmk/app -b nice_nano_v2 -d build/pones_corne_right -- \
   -DSHIELD=pones_corne_right -DZMK_CONFIG="$PONES_CONFIG/config"
 west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/pones_corne_dongle -- \
-  -DSHIELD="pones_corne_dongle prospector_adapter" \
-  -DZMK_CONFIG="$PONES_CONFIG/config"
+  -DSHIELD="pones_corne_dongle dongle_screen" \
+  -DZMK_CONFIG="$PONES_CONFIG/config" \
+  -DZMK_EXTRA_MODULES="$PONES_CONFIG/vendor/zmk-dongle-screen"
 ```
 
 Artifacts are `build/pones_corne_{left,right,dongle}/zephyr/zmk.uf2`
@@ -385,7 +390,7 @@ west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/reset_prospector 
    `build/reset_*/zephyr/zmk.uf2` to its mounted bootloader drive.
    Let settings-reset firmware boot and clear settings. Repeat for **dongle,
    left, and right** (the nice!nano reset image is used on both halves).
-2. Re-enter each bootloader and flash its normal image: dongle to Prospector,
+2. Re-enter each bootloader and flash its normal image: dongle to the XIAO,
    left to left nice!nano, right to right nice!nano. Keep halves powered off
    after flashing until their pairing turn. Do not interchange normal images.
    For example, with the actual left bootloader mount:
@@ -395,16 +400,16 @@ west build -p always -s zmk/app -b seeeduino_xiao_ble -d build/reset_prospector 
    ```
 
 3. Plug the dongle into the host/KVM. Power **left only** and let it pair first;
-   confirm the Prospector peripheral connection indicator before continuing.
-   Then power **right** and let it pair second. This left-to-right order is
-   required by the Prospector peripheral battery/status widget arrangement.
+   confirm the dongle screen shows its battery before continuing.
+   Then power **right** and let it pair second, so peripheral slot 0 is left
+   and slot 1 is right on the dongle's per-half battery widget.
 4. USB host reports now come from the dongle. For Bluetooth, hold Enter/MOVE,
    select H or J (profile 0 or 1), then `;` (BLE output); pair **Pones Corne**
    in the host UI. Forget any stale host bond first to refresh the changed HID
    descriptor. MOVE+L selects USB preference for the KVM.
 5. Verify 36 keys, thumb taps/holds, home-row mods, F+J Caps Word, base cursor,
    held MOUSE two-axis pad scrolling, pad taps, thumb buttons, keyboard mouse
-   fallbacks, Prospector display, and application/KVM macros. USB on a half is
+   fallbacks, dongle display, and application/KVM macros. USB on a half is
    flashing/power only. SYS+Q / SYS+P enter the left / right half's bootloader,
    SYS+Z the dongle's; use each device's hardware reset when pairing is absent.
 
@@ -414,24 +419,24 @@ and reset **all three** again before pairing left then right.
 
 ## Local validation
 
-All three images built locally with the pinned ZMK, Cirque, and Prospector
-modules, Zephyr SDK 0.16.8, west 1.5.0, CMake 3.28.4, and Python 3.13.5:
+All three images built locally with the pinned ZMK and Cirque modules, the
+vendored YADS screen, Zephyr SDK 0.16.8, west 1.5.0, CMake 3.28.4, and Python 3.13.5:
 
 | Shield | Board | Flash used / available | RAM used / 256 KiB | UF2 bytes |
 | --- | --- | --- | --- | --- |
 | `pones_corne_left` | `nice_nano_v2` | 170864 B / 792 KiB (21.07%) | 33868 B (12.92%) | 342016 |
 | `pones_corne_right` | `nice_nano_v2` | 175588 B / 792 KiB (21.65%) | 34100 B (13.01%) | 351232 |
-| `pones_corne_dongle` + `prospector_adapter` | `seeeduino_xiao_ble` | 436960 B / 788 KiB (54.15%) | 207316 B (79.08%) | 873984 |
+| `pones_corne_dongle` + `dongle_screen` (YADS) | `seeeduino_xiao_ble` | 423128 B / 788 KiB (52.44%) | 212548 B (81.08%) | 846336 |
 
-The display-heavy dongle leaves **54828 B** outside linked RAM allocations;
+The display-heavy dongle leaves **49596 B** outside linked RAM allocations;
 runtime stack/heap headroom has not been measured on hardware. Both
 `settings_reset` images also built: nice!nano 46188 B flash / 11552 B RAM /
-92672-byte UF2; Prospector 49512 B flash / 11640 B RAM / 99328-byte UF2.
+92672-byte UF2; XIAO 49512 B flash / 11640 B RAM / 99328-byte UF2.
 Firmware is under the ignored `build/` directories shown above.
 
 Validation reused an external west/toolchain workspace, passing this checkout's
-`config` via `ZMK_CONFIG` and **both** pinned modules via `ZMK_EXTRA_MODULES`.
-Normal builds above discover modules through `west update`.
+`config` via `ZMK_CONFIG` and the vendored YADS module via `ZMK_EXTRA_MODULES`.
+The Cirque module is discovered through `west update`.
 Compiled devicetrees were checked for five scanned columns/four rows per half,
 36 transform entries, 36 physical keys, 36 bindings on each of six layers,
 the dongle's empty mock scanner and processor chains, right-only Cirque,
@@ -454,10 +459,9 @@ simulated or certified by this smoke. No smoke scaffolding is committed.
 
 Non-fatal upstream warnings remain: deprecated `config/boards` discovery and
 `NRF_STORE_REBOOT_TYPE_GPREGRET`, peripheral USB defaults, and XIAO devicetree
-duplicate-address/deprecated-label warnings. The pinned Prospector observer
-also warns about an implicit `peripheral_slot_index_for_conn` declaration and
-an unused local; the final ELF resolves that call to the pinned ZMK central's
-exported symbol. Stock settings-reset emits empty-keymap array warnings.
+duplicate-address/deprecated-label warnings, and an `-Wint-conversion` warning
+from ZMK's own `central_bas_proxy.c`. Stock settings-reset emits empty-keymap
+array warnings.
 All five firmware builds complete; there is no module/API build blocker.
 
 ## Ported vs. deferred
@@ -476,7 +480,7 @@ reset on the ZMK-only SYS layer).
 - QMK one-shot hold symbols, weak-modifier clearing, and exact tap-dance/
   hold-tap/Caps Word timing semantics. Stock ZMK behavior is used instead.
 - QMK OLED logos and custom font; the left OLED uses ZMK's stock peripheral
-  status screen. Prospector uses its module's stock status screen.
+  status screen. The dongle uses YADS's stock status screen.
 - QMK console keystroke logger and `DB_TOGG`; that key is blocked.
 - Exact QMK kinetic mouse tuning, AVR USB polling/debounce/EEPROM behavior,
   and RGB matrix animations. No in-repo runtime C or driver fork is added.
@@ -489,10 +493,9 @@ reset on the ZMK-only SYS layer).
 - Reviewed but not yet enabled (enable after hardware soak/measurement):
   `CONFIG_ZMK_SLEEP` with an idle timeout on the halves (matrix already has
   `wakeup-source`); hold-tap `require-prior-idle-ms`/`quick-tap-ms` for home-row
-  mods; `CONFIG_ZMK_BLE_EXPERIMENTAL_CONN` only if host links drop; Prospector
-  display blanking, 4096 B display stack, or LVGL pool/font trimming only if the
-  dongle UI misbehaves (dongle RAM is ~79%); ZMK Studio on the dongle; moving to
-  ZMK main/Zephyr 4.1 once the Prospector module supports it.
+  mods; `CONFIG_ZMK_BLE_EXPERIMENTAL_CONN` only if host links drop; LVGL
+  pool/font trimming only if the dongle UI misbehaves (dongle RAM is ~81%);
+  ZMK Studio on the dongle; moving to ZMK main/Zephyr 4.1.
 
 No extra layers were added. Bluetooth/output controls occupy previously blocked
 MOVE slots; all existing navigation and macro bindings remain in place.

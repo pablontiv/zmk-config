@@ -1,8 +1,8 @@
 file_format: "1"
 id: pones_corne_dongle
-name: Pones Corne Prospector central
+name: Pones Corne dongle central (Prospector hardware, YADS screen)
 type: shield
-url: https://github.com/carrefinho/prospector/
+url: https://github.com/janpfischer/zmk-dongle-screen
 requires: [seeed_xiao]
 features:
   - keys
